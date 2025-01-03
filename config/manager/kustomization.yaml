@@ -6,3 +6,6 @@ images:
 - name: controller
   newName: ghcr.io/converged-computing/fluxqueue
   newTag: latest
+- name: scheduler
+  newName: ghcr.io/converged-computing/fluxqueue-scheduler
+  newTag: latest
