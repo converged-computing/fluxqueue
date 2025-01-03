@@ -1,4 +1,33 @@
+# Note that this is no longer built from the scheduler-plugins repo - it's built
+# directly from Kubernetes (in tree)
+# scheduler:
+#  name: fluxnetes
+#  image: ghcr.io/flux-framework/fluxnetes:latest
+#  replicaCount: 1
+#  pullPolicy: Always
+#  leaderElect: false
+
+postgres:
+  image: ghcr.io/flux-framework/fluxqueue-postgres:latest
+  pullPolicy: Always
+
+# LoadVariationRiskBalancing and TargetLoadPacking are not enabled by default
+# as they need extra RBAC privileges on metrics.k8s.io.
+
+#enableCertManager: true
+#kubernetesClusterDomain: cluster.local
+#webhookService:
+#  ports:
+#  - port: 9443
+#    protocol: TCP
+#    targetPort: 9443
+#  type: ClusterIP
 controllerManager:
+  fluxion:
+    image:
+      repository: ghcr.io/converged-computing/fluxqueue-scheduler
+      tag: latest
+    imagePullPolicy: IfNotPresent
   manager:
     args:
     - --metrics-bind-address=:8443
@@ -9,10 +38,16 @@ controllerManager:
       capabilities:
         drop:
         - ALL
+    env:
+      databaseUrl: postgres://postgres:postgres@postgres:5432/postgres
+      pgdatabase: postgres
+      pghost: postgres
+      pgpassword: postgres
+      pgport: "5432"
     image:
       repository: ghcr.io/converged-computing/fluxqueue
-      tag: test
-    imagePullPolicy: Always
+      tag: latest
+    imagePullPolicy: IfNotPresent
     resources:
       limits:
         cpu: 500m
