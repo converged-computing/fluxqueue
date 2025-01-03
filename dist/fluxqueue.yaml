@@ -383,8 +383,19 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
+        env:
+        - name: DATABASE_URL
+          value: postgres://postgres:postgres@postgres:5432/postgres
+        - name: PGHOST
+          value: postgres
+        - name: PGDATABASE
+          value: postgres
+        - name: PGPORT
+          value: "5432"
+        - name: PGPASSWORD
+          value: postgres
         image: ghcr.io/converged-computing/fluxqueue:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /healthz
@@ -418,8 +429,15 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
+      - command:
+        - /code/bin/server
+        - --port=4242
+        image: ghcr.io/converged-computing/fluxion:latest
+        imagePullPolicy: Always
+        name: fluxion
       securityContext:
-        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: fluxqueue-controller-manager
       terminationGracePeriodSeconds: 10
       volumes:

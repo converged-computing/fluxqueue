@@ -24,6 +24,16 @@ spec:
         command:
         - /manager
         env:
+        - name: DATABASE_URL
+          value: {{ quote .Values.controllerManager.manager.env.databaseUrl }}
+        - name: PGHOST
+          value: {{ quote .Values.controllerManager.manager.env.pghost }}
+        - name: PGDATABASE
+          value: {{ quote .Values.controllerManager.manager.env.pgdatabase }}
+        - name: PGPORT
+          value: {{ quote .Values.controllerManager.manager.env.pgport }}
+        - name: PGPASSWORD
+          value: {{ quote .Values.controllerManager.manager.env.pgpassword }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
@@ -54,6 +64,17 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
+      - command:
+        - /code/bin/server
+        - --port=4242
+        env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.controllerManager.fluxion.image.repository }}:{{ .Values.controllerManager.fluxion.image.tag
+          | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.controllerManager.fluxion.imagePullPolicy }}
+        name: fluxion
+        resources: {}
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
       serviceAccountName: {{ include "chart.fullname" . }}-controller-manager
