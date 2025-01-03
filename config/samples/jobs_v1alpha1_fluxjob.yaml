@@ -1,0 +1,9 @@
+apiVersion: jobs.converged-computing.org/v1alpha1
+kind: FluxJob
+metadata:
+  labels:
+    app.kubernetes.io/name: fluxqueue
+    app.kubernetes.io/managed-by: kustomize
+  name: fluxjob-sample
+spec:
+  # TODO(user): Add fields here

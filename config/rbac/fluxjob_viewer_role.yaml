@@ -1,0 +1,23 @@
+# permissions for end users to view fluxjobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: fluxqueue
+    app.kubernetes.io/managed-by: kustomize
+  name: fluxjob-viewer-role
+rules:
+- apiGroups:
+  - jobs.converged-computing.org
+  resources:
+  - fluxjobs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - jobs.converged-computing.org
+  resources:
+  - fluxjobs/status
+  verbs:
+  - get

@@ -1,0 +1,97 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: fluxjobs.jobs.converged-computing.org
+spec:
+  group: jobs.converged-computing.org
+  names:
+    kind: FluxJob
+    listKind: FluxJobList
+    plural: fluxjobs
+    singular: fluxjob
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: FluxJob is the Schema for the fluxjobs API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              FluxJobSpec defines the desired state of FluxJob
+              A user is not expected to create these -
+               1. A job or similar will be submit
+               2. It will be intercepted by a webhook here
+               3. The webhook will generate the object
+               4. The job will go into the fluxqueue
+               5. When scheduled, it gets sent with an exact node assignment
+                  to the custom scheduler plugin.
+               6. Cleanup will need to be handled
+
+
+              A FluxJob is a mapping of a Kubernetes abstraction (e.g., job)
+              into a Flux JobSpec, one that Fluxion can digest.
+            properties:
+              duration:
+                description: Duration is the maximum runtime of the job
+                format: int32
+                type: integer
+              jobspec:
+                description: JobSpec is the Flux jobspec
+                type: string
+              nodes:
+                description: Nodes needed for the job
+                format: int32
+                type: integer
+              object:
+                description: |-
+                  Object is the underlying pod/job/object specification
+                  This currently is assumed that one job has equivalent pods under it
+                format: byte
+                type: string
+              reservation:
+                description: |-
+                  If true, we are allowed to ask fluxion for
+                  a reservation
+                type: boolean
+              resources:
+                description: Resources assigned
+                properties:
+                  nodes:
+                    description: Nodes assigned to the job
+                    items:
+                      type: string
+                    type: array
+                type: object
+              type:
+                description: Type of object that is wrapped
+                type: integer
+            type: object
+          status:
+            description: FluxJobStatus defines the observed state of FluxJob
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  template:
+    metadata:
+      labels:
+        fluxqueue.pod-group: job-1
+        fluxqueue.group-size: "5"
+    spec:
+      # add fluxqueue?
+      # schedulerName: fluence
+      containers:
+      - name: job
+        image: busybox
+        command: [sleep, "10"]
+      restartPolicy: Never
+  backoffLimit: 4

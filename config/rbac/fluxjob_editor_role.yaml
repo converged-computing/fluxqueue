@@ -1,0 +1,27 @@
+# permissions for end users to edit fluxjobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: fluxqueue
+    app.kubernetes.io/managed-by: kustomize
+  name: fluxjob-editor-role
+rules:
+- apiGroups:
+  - jobs.converged-computing.org
+  resources:
+  - fluxjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - jobs.converged-computing.org
+  resources:
+  - fluxjobs/status
+  verbs:
+  - get
