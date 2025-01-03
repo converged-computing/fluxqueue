@@ -21,11 +21,11 @@ See the [docs](docs) for some detail on design choices.
 
 Fluxqueue builds three primary containers:
 
- - `ghcr.io/converged-computing/fluxqueue`: contains a custom kube-scheduler build with fluxqueue as the primary scheduler.
- - `ghcr.io/converged-computing/fluxqueue-sidecar`: provides the fluxion service, queue for pods and groups, and a second service that will expose a kubectl command for inspection of state.
+ - `ghcr.io/converged-computing/fluxqueue`: contains the webhook and operator with a flux queue for pods and groups that interacts with fluxion
+ - `ghcr.io/converged-computing/fluxqueue-scheduler`: provides the fluxion service
  - `ghcr.io/converged-computing/fluxqueue-postgres`: holds the worker queue and provisional queue tables
 
-Instead of doing an out of tree scheduler plugin, for this project I am adding directly to Kubernetes and building. I'm curious to see if this will be easier or harder to maintain than an out of tree plugin, which seems to break frequently as the upstream for scheduler-plugins changes. 
+Not yet developed yet is the custom scheduler plugin, which needs to go somewhere! 
 
 ## Deploy
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REGISTRY="${1:-ghcr.io/vsoch}"
+REGISTRY="${1:-ghcr.io/converged-computing}"
 HERE=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 ROOT=$(dirname ${HERE})
 
@@ -17,6 +17,7 @@ make build-all REGISTRY=${REGISTRY} # SCHEDULER_IMAGE=fluxqueue # SIDECAR_IMAGE=
 # kind load docker-image ${REGISTRY}/fluxnetes-sidecar:latest
 kind load docker-image ${REGISTRY}/fluxqueue:latest
 kind load docker-image ${REGISTRY}/fluxqueue-postgres:latest
+kind load docker-image ${REGISTRY}/fluxqueue-scheduler:latest
 
 # And then install using the charts. The pull policy ensures we use the loaded ones
 #  --set scheduler.image=${REGISTRY}/fluxnetes:latest \
