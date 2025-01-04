@@ -19,13 +19,14 @@ package controller
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue"
 )
 
 var (
@@ -38,6 +39,7 @@ type FluxJobReconciler struct {
 	Scheme     *runtime.Scheme
 	RESTClient rest.Interface
 	RESTConfig *rest.Config
+	Queue      *fluxqueue.Queue
 }
 
 func NewFluxJobReconciler(
@@ -45,12 +47,15 @@ func NewFluxJobReconciler(
 	scheme *runtime.Scheme,
 	restConfig *rest.Config,
 	restClient rest.Interface,
+	queue *fluxqueue.Queue,
+
 ) *FluxJobReconciler {
 	return &FluxJobReconciler{
 		Client:     client,
 		Scheme:     scheme,
 		RESTClient: restClient,
 		RESTConfig: restConfig,
+		Queue:      queue,
 	}
 }
 
@@ -68,12 +73,38 @@ func NewFluxJobReconciler(
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
-	logger.Info("Hello!")
+	// Create a new MetricSet
+	var spec api.FluxJob
 
-	return ctrl.Result{}, nil
+	// Keep developer informed what is going on.
+	rlog.Info("🌀 Event received by FluxJob controller!")
+	rlog.Info("Request: ", "req", req)
+
+	// Does the metric exist yet (based on name and namespace)
+	err := r.Get(ctx, req.NamespacedName, &spec)
+	if err != nil {
+
+		// Create it, doesn't exist yet
+		if errors.IsNotFound(err) {
+			rlog.Info("🔴 FluxJob not found. Ignoring since object must be deleted.")
+
+			// This should not be necessary, but the config map isn't owned by the operator
+			return ctrl.Result{}, nil
+		}
+		rlog.Info("🔴 Failed to get FluxJob. Re-running reconcile.")
+		return ctrl.Result{Requeue: true}, err
+	}
+	rlog.Info("Found FluxJob", "Name", spec.Name, "Namespace", spec.Namespace, "Status", spec.Status.SubmitStatus)
+
+	// Submit the job to the queue
+
+	// If we are successful, update the status
+	result := ctrl.Result{}
+	if err == nil {
+		result, err = r.updateStatus(&spec, api.SubmitStatusSubmit)
+	}
+	return result, err
 }
 
 // SetupWithManager sets up the controller with the Manager.

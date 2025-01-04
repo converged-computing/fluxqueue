@@ -2,7 +2,9 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
+	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -49,17 +51,34 @@ func SubmitFluxJob(
 		return err
 	}
 
+	// Generate a jobspec for that many nods (starting simple)
+	// The command doesn't really matter, and tasks is set to 0
+	js, err := jobspec.NewSimpleJobspec(name, "echo hello world", nodes, 0)
+	if err != nil {
+		slog.Error(err, "Issue with creating job", "Namespace", namespace, "Name", jobName)
+		return err
+	}
+	asYaml, err := js.JobspecToYaml()
+	if err != nil {
+		slog.Error(err, "Issue with serializing jobspec to yaml")
+		return err
+	}
+
 	// If we get here, create!
+	fmt.Println(asYaml)
 	slog.Info("Creating flux job ", "Namespace", namespace, "Name", jobName)
 
 	// Define the Flux Job
 	fluxjob := &FluxJob{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace},
 		Spec: FluxJobSpec{
-			JobSpec: "",
+			JobSpec: asYaml,
 			Object:  spec,
 			Nodes:   nodes,
 			Type:    jobType,
+		},
+		Status: FluxJobStatus{
+			SubmitStatus: SubmitStatusNew,
 		},
 	}
 	err = cli.Create(ctx, fluxjob)

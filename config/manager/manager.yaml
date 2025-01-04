@@ -83,20 +83,20 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         # The operator queue will need to talk to the database
-        #readinessProbe:
-        #  exec:
-        #    command:
-        #      - "sh"
-        #      - "-c"
-        #      - >
-        #        status=$(curl -ks  https://localhost:8081/readyz); if [ "$status" -ne "ok" ]; then exit 1; fi
-        #        pg_isready -d postgres -h postgres -p 5432 -U postgres;
         readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          exec:
+            command:
+              - "bash"
+              - "-c"
+              - |
+                status=$(curl -ks http://localhost:8081/readyz); if [ "$status" != "ok" ]; then exit 1; fi
+                pg_isready -d postgres -h postgres -p 5432 -U postgres;
+        #readinessProbe:
+        #  httpGet:
+        #    path: /readyz
+        #    port: 8081
+        #  initialDelaySeconds: 5
+        #  periodSeconds: 10
         # TODO(user): Configure the resources accordingly based on the project requirements.
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
@@ -106,6 +106,7 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+      # This container provides the fluxion service
       - image: ghcr.io/converged-computing/fluxion:latest
         imagePullPolicy: Always
         command:
@@ -113,7 +114,7 @@ spec:
         - --port=4242
         # - --external-service
         name: fluxion
-        # These are exposed for the kubectl plugin
+        # These can be exposed for the kubectl plugin
         # ports:
         #  - containerPort: xxxx
         #    hostPort: xxxx

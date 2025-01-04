@@ -100,6 +100,7 @@ SELECT group_name, group_size from pods_provisional;
 
 ### TODO
 
+- [ ] deletion of job or pod needs to trigger deletion / cancel
 - [ ] Figure out how to add queue
 - [ ] Figure out how to add fluxion
 - [ ] kubectl plugin to get fluxion state?

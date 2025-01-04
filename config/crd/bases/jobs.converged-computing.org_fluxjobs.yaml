@@ -89,6 +89,9 @@ spec:
             type: object
           status:
             description: FluxJobStatus defines the observed state of FluxJob
+            properties:
+              submitStatus:
+                type: string
             type: object
         type: object
     served: true

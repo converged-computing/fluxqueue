@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -41,6 +42,7 @@ import (
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/internal/controller"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -155,6 +157,12 @@ func main() {
 		Kind:    "Pod",
 	}
 
+	// Create the queue
+	ctx := context.Background()
+	queue, err := fluxqueue.NewQueue(ctx)
+	if err != nil {
+		setupLog.Error(err, "Issue with Fluxnetes queue")
+	}
 	c, err := rest.HTTPClientFor(mgr.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to create REST HTTP client", "controller", c)
@@ -168,6 +176,7 @@ func main() {
 		mgr.GetScheme(),
 		mgr.GetConfig(),
 		restClient,
+		queue,
 	)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MiniMummi")

@@ -17,6 +17,8 @@ var (
 	schedulingGateName = "fluxqueue"
 	schedulerName      = "fluxion"
 	mgr                manager.Manager
+
+	seenLabel = "fluxqueue.seen"
 )
 
 // IMPORTANT: if you use the controller-runtime builder, it will derive this name automatically from the gvk (kind, version, etc. so find the actual created path in the logs)
@@ -87,7 +89,7 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
 }
 
-// InjectPod adds the sidecar container to a pod
+// EnqueuePod submits a flux job for the pod
 func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
 	logger.Info("Enqueue pod", "Name", pod.Name, "Namespace", pod.Namespace)
 
@@ -95,6 +97,21 @@ func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
 	if pod.Spec.SchedulingGates == nil {
 		pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{}
 	}
+
+	// Check if we have a label from another abstraction. E.g.,, a job that includes
+	// pods should not schedule the pods twice
+	if pod.ObjectMeta.Labels == nil {
+		pod.ObjectMeta.Labels = map[string]string{}
+	}
+
+	// We've already seen this pod elsewhere, exit without re-submit
+	_, ok := pod.ObjectMeta.Labels[seenLabel]
+	if ok {
+		return nil
+	}
+	// Mark the pod now as seen
+	pod.ObjectMeta.Labels[seenLabel] = "yes"
+
 	fluxqGate := corev1.PodSchedulingGate{Name: schedulingGateName}
 	pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, fluxqGate)
 
@@ -131,6 +148,14 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 	if err != nil {
 		return err
 	}
+
+	// Add labels to the pod so they don't trigger another submit/schedule
+	// Check if we have a label from another abstraction. E.g.,, a job that includes
+	// pods should not schedule the pods twice
+	if job.Spec.Template.ObjectMeta.Labels == nil {
+		job.Spec.Template.ObjectMeta.Labels = map[string]string{}
+	}
+	job.Spec.Template.ObjectMeta.Labels[seenLabel] = "yes"
 
 	logger.Info("received job", "Name", job.Name)
 	return SubmitFluxJob(

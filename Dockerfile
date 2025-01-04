@@ -14,6 +14,7 @@ RUN go mod download
 # Copy the go source
 COPY cmd/manager/main.go cmd/main.go
 COPY api/ api/
+COPY pkg/ pkg/
 COPY internal/controller/ internal/controller/
 
 # Build
@@ -25,9 +26,13 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# Using this to allow for interaction / testing postgres
+#FROM gcr.io/distroless/static:nonroot
+FROM golang:1.22
 WORKDIR /
+USER root
+RUN apt-get update && apt-get install -y postgresql && apt-get clean
 COPY --from=builder /workspace/manager .
-USER 65532:65532
+# USER 65532:65532
 
 ENTRYPOINT ["/manager"]
