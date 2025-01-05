@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	fluxion "github.com/converged-computing/fluxion/pkg/client"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -40,6 +41,7 @@ type FluxJobReconciler struct {
 	RESTClient rest.Interface
 	RESTConfig *rest.Config
 	Queue      *fluxqueue.Queue
+	Fluxion    fluxion.Client
 }
 
 func NewFluxJobReconciler(
@@ -48,7 +50,7 @@ func NewFluxJobReconciler(
 	restConfig *rest.Config,
 	restClient rest.Interface,
 	queue *fluxqueue.Queue,
-
+	fluxCli fluxion.Client,
 ) *FluxJobReconciler {
 	return &FluxJobReconciler{
 		Client:     client,
@@ -56,6 +58,7 @@ func NewFluxJobReconciler(
 		RESTClient: restClient,
 		RESTConfig: restConfig,
 		Queue:      queue,
+		Fluxion:    fluxCli,
 	}
 }
 
@@ -88,21 +91,26 @@ func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Create it, doesn't exist yet
 		if errors.IsNotFound(err) {
 			rlog.Info("🔴 FluxJob not found. Ignoring since object must be deleted.")
-
-			// This should not be necessary, but the config map isn't owned by the operator
 			return ctrl.Result{}, nil
 		}
 		rlog.Info("🔴 Failed to get FluxJob. Re-running reconcile.")
 		return ctrl.Result{Requeue: true}, err
 	}
 	rlog.Info("Found FluxJob", "Name", spec.Name, "Namespace", spec.Namespace, "Status", spec.Status.SubmitStatus)
+	result := ctrl.Result{}
+
+	// If the job is already submit, continue
+	if spec.Status.SubmitStatus == api.SubmitStatusSubmit {
+		return result, nil
+	}
 
 	// Submit the job to the queue
-
 	// If we are successful, update the status
-	result := ctrl.Result{}
+	result, err = r.submitJob(&spec)
 	if err == nil {
 		result, err = r.updateStatus(&spec, api.SubmitStatusSubmit)
+	} else {
+		result, err = r.updateStatus(&spec, api.SubmitStatusError)
 	}
 	return result, err
 }

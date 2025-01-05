@@ -1,16 +1,31 @@
 package queries
 
 const (
-	// Used to get the earliest timestamp for the group
-	GetTimestampQuery = "select created_at from pods_provisional where group_name=$1 and namespace=$2 limit 1;"
 
-	// When we complete a job worker type after a successful MatchAllocate, this is how we send nodes back via an event
-	UpdateNodesQuery = "update river_job set args = jsonb_set(args, '{nodes}', to_jsonb($1::text)) where id=$2;"
+	// Pending Queue queries
+	// We always check if a job is in pending before Enqueue, because if so, we aren't allowed to modify / add again
+	// In practice with Kubernetes this should not happen, as the API server would detect the object already exists
+	IsPendingQuery = "select * from pending_queue where name = $1 and namespace = $2;"
+
+	// Insert into pending queue (assumes after above query, we've checked it does not exist)
+	// InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, created_at, size) SELECT '%s', '%s', '%d' WHERE NOT EXISTS (SELECT (name, namespace) FROM pending_queue WHERE name = '%s' and namespace = '%s');"
+	InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, created_at, size) values ($1, $2, $3, $4, $5, $6, $7, $8, $9);"
+
+	// Easy Queries to get jobs
+	// Select jobs based on creation timestamp
+	SelectPendingByCreation = "select jobspec, object, name, namespace, type, reservation, duration, size from pending_queue order by created_at desc;"
 
 	// Reservations
 	AddReservationQuery     = "insert into reservations (group_name, flux_id) values ($1, $2);"
 	DeleteReservationsQuery = "truncate reservations; delete from reservations;"
 	GetReservationsQuery    = "select (group_name, flux_id) from reservations;"
+
+	// NOTE CHECKED BELOW HERE
+	// Used to get the earliest timestamp for the group
+	/*GetTimestampQuery = "select created_at from pods_provisional where group_name=$1 and namespace=$2 limit 1;"
+
+	// When we complete a job worker type after a successful MatchAllocate, this is how we send nodes back via an event
+	UpdateNodesQuery = "update river_job set args = jsonb_set(args, '{nodes}', to_jsonb($1::text)) where id=$2;"
 
 	// We need to get a single podspec for binding, etc
 	GetPodspecQuery = "select podspec from pods_provisional where group_name = $1 and name = $2 and namespace = $3;"
@@ -25,15 +40,12 @@ const (
 	// This currently will use one podspec (and all names) and we eventually want it to use all podspecs
 	SelectPodsQuery = `select name, podspec from pods_provisional where group_name = $1 and namespace = $2;`
 
-	// Pending queue - inserted after moving from provisional
-	InsertIntoPending = "insert into pending_queue (group_name, namespace, group_size) SELECT '%s', '%s', '%d' WHERE NOT EXISTS (SELECT (group_name, namespace) FROM pending_queue WHERE group_name = '%s' and namespace = '%s');"
-
 	// We delete from the provisional tables when a group is added to the work queues (and pending queue, above)
 	DeleteProvisionalGroupsQuery = "delete from groups_provisional where %s;"
 	DeleteProvisionalPodsQuery   = "delete from pods_provisional where group_name = $1 and namespace = $2;"
 
 	// TODO add created_at back
-	InsertIntoProvisionalQuery = "insert into pods_provisional (podspec, namespace, name, duration, group_name, created_at) select '%s', '%s', '%s', %d, '%s', $1 where not exists (select (group_name, name, namespace) from pods_provisional where group_name = '%s' and namespace = '%s' and name = '%s');"
+	// InsertIntoProvisionalQuery = "insert into pods_provisional (podspec, namespace, name, duration, group_name, created_at) select '%s', '%s', '%s', %d, '%s', $1 where not exists (select (group_name, name, namespace) from pods_provisional where group_name = '%s' and namespace = '%s' and name = '%s');"
 
 	// Enqueue queries
 	// TODO these need escaping (sql injection)
@@ -47,10 +59,6 @@ const (
 	UpdatingPendingWithFluxID = "update pending_queue set flux_id = $1 where group_name = $2 and namespace = $3;"
 	GetFluxID                 = "select flux_id from pending_queue where group_name = $1 and namespace = $2;"
 
-	// Pending Queue queries
-	// 3. We always check if a group is in pending before Enqueue, because if so, we aren't allowed to modify / add to the group
-	IsPendingQuery = "select * from pending_queue where group_name = $1 and namespace = $2;"
-
 	// We remove from pending to allow another group submission of the same name on cleanup
-	DeleteFromPendingQuery = "delete from pending_queue where group_name=$1 and namespace=$2;"
+	DeleteFromPendingQuery = "delete from pending_queue where name=$1 and namespace=$2;"*/
 )

@@ -2,25 +2,20 @@ package fluxqueue
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
-
+	"github.com/jackc/pgx/pgtype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivershared/util/slogutil"
+	klog "k8s.io/klog/v2"
 
-	groups "github.com/converged-computing/fluxqueue/pkg/fluxqueue/group"
+	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
 	strategies "github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/types"
@@ -72,7 +67,11 @@ func NewQueue(ctx context.Context) (*Queue, error) {
 	workers := river.NewWorkers()
 
 	// Each strategy has its own worker type
-	strategy.AddWorkers(workers)
+	err = strategy.AddWorkers(workers)
+	if err != nil {
+		return nil, err
+	}
+
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		// Change the verbosity of the logger here
 		Logger: slog.New(&slogutil.SlogMessageOnlyHandler{Level: slog.LevelWarn}),
@@ -145,7 +144,7 @@ func (q *Queue) setupEvents() {
 
 // Common queue / database functions across strategies!
 // GetFluxID returns the flux ID, and -1 if not found (deleted)
-func (q *Queue) GetFluxID(namespace, groupName string) (int64, error) {
+/*func (q *Queue) GetFluxID(namespace, groupName string) (int64, error) {
 	var fluxID int32 = -1
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
@@ -162,10 +161,10 @@ func (q *Queue) GetFluxID(namespace, groupName string) (int64, error) {
 		return int64(-1), err
 	}
 	return int64(fluxID), err
-}
+}*/
 
 // Get all pods in a group
-func (q *Queue) GetGroupPods(namespace, groupName string) ([]*corev1.Pod, error) {
+/*func (q *Queue) GetGroupPods(namespace, groupName string) ([]*corev1.Pod, error) {
 	podlist := []*corev1.Pod{}
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
@@ -206,12 +205,13 @@ func (q *Queue) GetGroupPods(namespace, groupName string) ([]*corev1.Pod, error)
 		}
 	}
 	return podlist, nil
-}
+}*/
 
 // Get a pod (Podspec) on demand
 // We need to be able to do this to complete a scheduling cycle
 // This podSpec will eventually need to go into the full request to
 // ask fluxion for nodes, right now we still use a single representative one
+/*
 func (q *Queue) GetPodSpec(namespace, name, groupName string) (*corev1.Pod, error) {
 
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
@@ -231,9 +231,10 @@ func (q *Queue) GetPodSpec(namespace, name, groupName string) (*corev1.Pod, erro
 	var pod corev1.Pod
 	err = json.Unmarshal([]byte(podspec), &pod)
 	return &pod, err
-}
+}*/
 
 // GetInformer returns the pod informer to run as a go routine
+// TODO this should be done through the operator, and then triggered here
 func (q *Queue) GetInformer() error { //cache.SharedIndexInformer {
 	return nil
 	//	return cache.SharedIndexInformer{}
@@ -250,63 +251,66 @@ func (q *Queue) GetInformer() error { //cache.SharedIndexInformer {
 	//	return podsInformer
 }
 
-// Enqueue a new job to the provisional queue
-// 1. Assemble (discover or define) the group
-// 2. Add to provisional table
-func (q *Queue) Enqueue(pod *corev1.Pod) (types.EnqueueStatus, error) {
+// Enqueue a new job to the pending queue
+// This functionality is shared across strategies. We add the jobs
+// as they are submit to Kubernetes
+// This parent function passes the jobspec onto the queue strategy
+func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 
-	// Get the pod name, duration (seconds) and size, first from labels, then defaults
-	groupName := ""
-	//	size, err := groups.GetPodGroupSize(pod)
-	//	if err != nil {
-	//
-	//		return types.Unknown, err
-	//	}
-
-	// Get the creation timestamp for the group
-	ts, err := q.GetCreationTimestamp(pod, groupName)
+	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
+		klog.Errorf("Issue creating new pool %s", err)
 		return types.Unknown, err
 	}
+	defer pool.Close()
 
-	//	duration, err := groups.GetPodGroupDuration(pod)
-	//	if err != nil {
-	//		return types.Unknown, err
-	//	}
-	// Log the namespace/name, group name, and size
-	klog.Infof("Pod %s has Group %s (%d, %d seconds) created at %s", pod.Name, groupName, 1, 0, ts)
-
-	// Add the pod to the provisional table.
-	// Every strategy can have a custom provisional queue
-	group := &groups.PodGroup{
-		Size:      1,
-		Name:      groupName,
-		Timestamp: ts,
-		Duration:  0,
+	// First check - a job that is already in pending (unique by name and namespace)
+	// is not allowed to be submit again. The job is either waiting or running.
+	result, err := pool.Exec(context.Background(), queries.IsPendingQuery, spec.Name, spec.Namespace)
+	if err != nil {
+		klog.Infof("Error checking if job %s/%s is in pending queue", spec.Namespace, spec.Name)
+		return types.Unknown, err
 	}
-	return q.Strategy.Enqueue(q.Context, q.Pool, pod, group)
+	if strings.Contains(result.String(), "INSERT 1") {
+		return types.JobAlreadyInPending, nil
+	}
+
+	// We use the CRD creation timestamp
+	ts := &pgtype.Timestamptz{Time: spec.ObjectMeta.CreationTimestamp.Time}
+
+	// Insert into pending queue, only if name and namespace don't exist.
+	_, err = pool.Exec(context.Background(), queries.InsertIntoPending,
+		spec.Spec.Object,
+		spec.Spec.JobSpec,
+		spec.Name, spec.Namespace,
+		spec.Spec.Type,
+		spec.Spec.Reservation,
+		spec.Spec.Duration,
+		ts, spec.Spec.Nodes,
+	)
+	// If unknown, we won't give status submit, and it should requeue to try again
+	if err != nil {
+		klog.Infof("Error inserting job %s/%s into pending queue", spec.Namespace, spec.Name)
+		return types.Unknown, err
+	}
+	return types.JobEnqueueSuccess, nil
 }
 
-// Schedule moves jobs from provisional to work queue
-// This is based on a queue strategy. The default is easy with backfill.
-// This mimics what Kubernetes does. Note that jobs can be sorted
-// based on the scheduled at time AND priority.
+// Schedule assesses jobs in pending to be sent to Fluxion.
+// The strategy determines which get chosen (e.g., scheduled at time or priority)
 func (q *Queue) Schedule() error {
-	// Queue Strategy "Schedule" moves provisional to the worker queue
-	// We get them back in a back to schedule
+	//batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
+	//if err != nil {
+	//	return err
+	//}
 
-	batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
-	if err != nil {
-		return err
-	}
-
-	if len(batch) > 0 {
-		count, err := q.riverClient.InsertMany(q.Context, batch)
-		if err != nil {
-			return err
-		}
-		klog.Info(count)
-	}
+	//if len(batch) > 0 {
+	//	count, err := q.riverClient.InsertMany(q.Context, batch)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	klog.Info(count)
+	//}
 
 	// Post submit functions
 	return q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
@@ -314,7 +318,7 @@ func (q *Queue) Schedule() error {
 
 // GetCreationTimestamp returns the creation time of a podGroup or a pod in seconds (time.MicroTime)
 // We either get this from the pod itself (if size 1) or from the database
-func (q *Queue) GetCreationTimestamp(pod *corev1.Pod, groupName string) (metav1.MicroTime, error) {
+/*func (q *Queue) GetCreationTimestamp(pod *corev1.Pod, groupName string) (metav1.MicroTime, error) {
 
 	// First see if we've seen the group before, the creation times are shared across a group
 	ts := metav1.MicroTime{}
@@ -327,4 +331,4 @@ func (q *Queue) GetCreationTimestamp(pod *corev1.Pod, groupName string) (metav1.
 		return ts, err
 	}
 	return groups.GetPodCreationTimestamp(pod), nil
-}
+}*/

@@ -3,7 +3,6 @@ package strategy
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
 	klog "k8s.io/klog/v2"
 
 	"github.com/jackc/pgx/v5"
@@ -11,11 +10,15 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/defaults"
-	groups "github.com/converged-computing/fluxqueue/pkg/fluxqueue/group"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
-	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/provisional"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/workers"
 	work "github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/workers"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+)
+
+var (
+	elog = ctrl.Log.WithName("easy")
 )
 
 // Easy with Backfill
@@ -43,29 +46,45 @@ type ReservationModel struct {
 // AddtWorkers adds the worker for the queue strategy
 // job worker: a queue to submit jobs to fluxion
 // cleanup worker: a queue to cleanup
-func (EasyBackfill) AddWorkers(workers *river.Workers) {
-	river.AddWorker(workers, &work.JobWorker{})
-	river.AddWorker(workers, &work.CleanupWorker{})
+func (EasyBackfill) AddWorkers(workers *river.Workers) error {
+	jobWorker, err := work.NewJobWorker()
+	if err != nil {
+		return err
+	}
+
+	cleanupWorker, err := work.NewCleanupWorker()
+	if err != nil {
+		return err
+	}
+
+	river.AddWorker(workers, jobWorker)
+	river.AddWorker(workers, cleanupWorker)
+	return nil
 }
 
-// Schedule moves pod groups from provisional to workers based on a strategy.
+// Schedule moves pending jobs into being scheduled, which means doing
+// some kind of sort, asking Fluxion, and then alerting the operator when a job
+// is scheduled. When this happens, it us unsuspended / ungated to move to the
+// fluxion scheduler plugin, where it also is given the exact node assignment.
 // We return a listing of river.JobArgs (JobArgs here) to be submit with batch.
+
+// Easy strategy:
 // In this case it is first come first serve - we just sort based on the timestamp
-// and add them to the worker queue. They run with they can, with smaller
-// jobs being allowed to fill in. Other strategies will need to handle AskFlux
-// and submitting batch differently.
+// and add them to the worker queue. The job here is a request to AskFlux, and the
+// result of that determines if the job is actually scheduled for Kubernetes.
+// We don't limit the number of jobs from pending - we go through them all.
+// Other strategies can handle AskFlux and submitting batch differently.
 func (s EasyBackfill) Schedule(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	reservationDepth int32,
 ) ([]river.InsertManyParams, error) {
 
-	pending := provisional.NewProvisionalQueue(pool)
-
-	// Is this group ready to be scheduled with the addition of this pod?
-	jobs, err := pending.ReadyJobs(ctx, pool)
+	// Serialize pending queue into jobs for river
+	// Each will run AskFlux (to fluxion) to attempt schedule
+	jobs, err := s.ReadyJobs(ctx, pool)
 	if err != nil {
-		klog.Errorf("issue FCFS with backfill querying for ready groups")
+		elog.Error(err, "issue FCFS with backfill querying for ready groups")
 		return nil, err
 	}
 
@@ -82,16 +101,54 @@ func (s EasyBackfill) Schedule(
 	// Note: this is how to eventually add Priority (1-4, 4 is lowest)
 	// And we can customize other InsertOpts. Of interest is Pending:
 	// https://github.com/riverqueue/river/blob/master/insert_opts.go#L35-L40
-	// Note also that ScheduledAt can be used for a reservation!
+	// Note also that ScheduledAt can be used to ask fluxion in the future
 	batch := []river.InsertManyParams{}
 	for i, jobArgs := range jobs {
 		args := river.InsertManyParams{Args: jobArgs, InsertOpts: &insertOpts}
 		if int32(i) < reservationDepth {
-			jobArgs.Reservation = true
+			jobArgs.Reservation = 1
 		}
 		batch = append(batch, args)
 	}
 	return batch, nil
+}
+
+// getReadyGroups gets groups that are ready for moving from provisional to pending
+// We also save the pod names so we can assign (bind) to nodes later
+func (s EasyBackfill) ReadyJobs(ctx context.Context, pool *pgxpool.Pool) ([]workers.JobArgs, error) {
+
+	// First retrieve the group names that are the right size
+	rows, err := pool.Query(ctx, queries.SelectPendingByCreation)
+	if err != nil {
+		elog.Error(err, "selecting pending jobs")
+		return nil, err
+	}
+	defer rows.Close()
+
+	models, err := pgx.CollectRows(rows, pgx.RowToStructByName[types.JobModel])
+	if err != nil {
+		klog.Infof("GetReadGroups Error: collect rows for groups at size: %s", err)
+		return nil, err
+	}
+
+	// Collect rows into map, and then slice of jobs
+	jobs := []workers.JobArgs{}
+
+	// Collect rows into single result
+	for _, model := range models {
+		jobArgs := workers.JobArgs{
+			Jobspec:     model.JobSpec,
+			Object:      model.Object,
+			Name:        model.Name,
+			Namespace:   model.Namespace,
+			Type:        model.Type,
+			Reservation: model.Reservation,
+			Size:        model.Size,
+			Duration:    model.Duration,
+		}
+		jobs = append(jobs, jobArgs)
+	}
+	return jobs, nil
 }
 
 // PostSubmit does clearing of reservations
@@ -160,14 +217,4 @@ func (s EasyBackfill) PostSubmit(
 		defer dRows.Close()
 	}
 	return nil
-}
-
-func (s EasyBackfill) Enqueue(
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	pod *corev1.Pod,
-	group *groups.PodGroup,
-) (types.EnqueueStatus, error) {
-	pending := provisional.NewProvisionalQueue(pool)
-	return pending.Enqueue(ctx, pod, group)
 }

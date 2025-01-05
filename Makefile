@@ -117,10 +117,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
-.PHONY build-postgres: 
+.PHONY: build-postgres
 	docker build -f build/postgres/Dockerfile -t ${POSTGRES_IMAGE} .
 
-.PHONY build-scheduler: 
+.PHONY: build-scheduler 
 	docker build -t ${SCHEDULER_IMAGE} ./build/scheduler
 
 .PHONY: build-all

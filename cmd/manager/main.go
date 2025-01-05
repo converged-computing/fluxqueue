@@ -27,6 +27,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 
+	fluxion "github.com/converged-computing/fluxion/pkg/client"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -43,6 +44,7 @@ import (
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/internal/controller"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue"
+	"github.com/riverqueue/river"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -60,6 +62,7 @@ func init() {
 
 func main() {
 	var metricsAddr string
+	var policy string
 	var enableLeaderElection bool
 	var probeAddr string
 	var secureMetrics bool
@@ -68,6 +71,7 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&policy, "policy", "", "Policy for fluxion scheduler")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -171,13 +175,29 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to create REST client", "controller", restClient)
 	}
+
+	// Create fluxion client, this will init fluxion with the cluster state
+	fluxCli, err := fluxion.NewClient("127.0.0.1:4242")
+	if err != nil {
+		setupLog.Error(err, "creating Fluxion client")
+	}
 	reconciler := controller.NewFluxJobReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		mgr.GetConfig(),
 		restClient,
 		queue,
+		fluxCli,
 	)
+	if err != nil {
+		setupLog.Error(err, "creating FluxJob reconciler")
+	}
+	reconciler.InitFluxion(ctx, policy)
+
+	// defer fluxCli.Close()
+
+	// Init cluster (or get state)
+
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MiniMummi")
 		os.Exit(1)
@@ -199,9 +219,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Ensure the queue stops when we exit
+	defer queue.Pool.Close()
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+
+	waitForJob := func(subscribeChan <-chan *river.Event) {
+		for {
+			select {
+			case event := <-subscribeChan:
+				if event == nil {
+					setupLog.Info("Channel is closed")
+					return
+				}
+				setupLog.Info("Job Event Received", "Kind", event.Job.Kind)
+			}
+		}
+	}
+	defer queue.EventChannel.Function()
+	waitForJob(queue.EventChannel.Channel)
+
+	err = queue.Stop(ctx)
+	if err != nil {
+		setupLog.Error(err, "Failed to stop FluxQueue")
+	}
+	<-ctx.Done()
 }

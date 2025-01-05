@@ -1,8 +1,6 @@
 package fluxqueue
 
 import (
-	"encoding/json"
-
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/workers"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,10 +61,10 @@ func (q *Queue) DeletePodEvent(podObj interface{}) {
 	// - deletes fluxID if it exists
 	// - cleans up Kubernetes objects up to parent with "true"
 	// - cleans up job in pending table
-	podspec, err := json.Marshal(pod)
-	if err != nil {
-		klog.Errorf("Issue marshalling podspec for Pod %s/%s", pod.Namespace, pod.Name)
-	}
+	//podspec, err := json.Marshal(pod)
+	//if err != nil {
+	//	klog.Errorf("Issue marshalling podspec for Pod %s/%s", pod.Namespace, pod.Name)
+	//}
 	//groupName := groups.GetPodGroupName(pod)
 
 	// Since this is a termination event (meaning a single pod has terminated)
@@ -77,7 +75,7 @@ func (q *Queue) DeletePodEvent(podObj interface{}) {
 	//	if err != nil {
 	//		klog.Errorf("Issue getting group pods for %s", "")
 	//	}
-	fluxID, err := q.GetFluxID(pod.Namespace, "")
+	//fluxID, err := q.GetFluxID(pod.Namespace, "")
 
 	// Determine finished status (delete via fluxion flux id ONLY if all are finished)
 	//	finished := true
@@ -91,5 +89,5 @@ func (q *Queue) DeletePodEvent(podObj interface{}) {
 	//	if !finished {
 	//		fluxID = -1
 	//	}
-	err = workers.Cleanup(q.Context, string(podspec), fluxID, false, "")
+	//err = workers.Cleanup(q.Context, string(podspec), fluxID, false, "")
 }

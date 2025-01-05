@@ -18,9 +18,9 @@ import (
 
 	klog "k8s.io/klog/v2"
 
+	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/defaults"
-	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
 
 	"github.com/riverqueue/river"
 )
@@ -40,6 +40,23 @@ func (args CleanupArgs) Kind() string { return "cleanup" }
 
 type CleanupWorker struct {
 	river.WorkerDefaults[CleanupArgs]
+	fluxion client.Client
+}
+
+// NewJobWorker returns a new job worker with a Fluxion client
+func NewCleanupWorker() (*CleanupWorker, error) {
+	worker := CleanupWorker{}
+
+	// This is the host where fluxion is running, will be localhost 4242 for sidecar
+	// Note that this design isn't ideal - we should be calling this just once
+	c, err := client.NewClient("127.0.0.1:4242")
+	if err != nil {
+		klog.Error(err, "[WORK] Fluxion error connecting to server")
+		return nil, err
+	}
+	worker.fluxion = c
+	//	defer worker.fluxion.Close()
+	return &worker, err
 }
 
 // SubmitCleanup submits a cleanup job N seconds into the future
@@ -204,7 +221,7 @@ func Cleanup(
 	defer pool.Close()
 
 	// Delete from pending and pods provisional, meaning we are allowed to accept new pods for the group
-	_, err = pool.Exec(context.Background(), queries.DeleteProvisionalGroupsQuery, groupName, pod.Namespace)
+	/*_, err = pool.Exec(context.Background(), queries.DeleteProvisionalGroupsQuery, groupName, pod.Namespace)
 	if err != nil {
 		klog.Infof("Error deleting Pods %s/%s from provisional queue", pod.Namespace, pod.Name)
 		return err
@@ -214,7 +231,7 @@ func Cleanup(
 	if err != nil {
 		klog.Infof("Error deleting Pod %s/%s from pending queue", pod.Namespace, pod.Name)
 		return err
-	}
+	}*/
 	klog.Infof("[CLEANUP-COMPLETE] for group %s (flux job id %d)", groupName, fluxID)
 	return nil
 }

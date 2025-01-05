@@ -57,6 +57,7 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          - --policy=lonode
         image: controller:latest
         imagePullPolicy: IfNotPresent
         name: manager

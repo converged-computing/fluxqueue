@@ -18,6 +18,9 @@ kind load docker-image ${REGISTRY}/fluxqueue-scheduler:latest
 
 # And then install using the charts. The pull policy ensures we use the loaded ones
 helm uninstall fluxqueue --namespace fluxqueue-system || true
+
+# So we don't try to interact with old webhook, etc.
+sleep 5
 helm install \
   --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
   --set scheduler.image=${REGISTRY}/fluxqueue-scheduler:latest \
