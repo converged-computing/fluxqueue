@@ -8,8 +8,8 @@ const (
 	IsPendingQuery = "select * from pending_queue where name = $1 and namespace = $2;"
 
 	// Insert into pending queue (assumes after above query, we've checked it does not exist)
-	// InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, created_at, size) SELECT '%s', '%s', '%d' WHERE NOT EXISTS (SELECT (name, namespace) FROM pending_queue WHERE name = '%s' and namespace = '%s');"
-	InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, created_at, size) values ($1, $2, $3, $4, $5, $6, $7, $8, $9);"
+	InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, size) values ($1, $2, $3, $4, $5, $6, $7, $8);"
+	// InsertIntoPending = "insert into pending_queue (jobspec, object, name, namespace, type, reservation, duration, created_at, size) values ($1, $2, $3, $4, $5, $6, $7, $8, $9);"
 
 	// Easy Queries to get jobs
 	// Select jobs based on creation timestamp

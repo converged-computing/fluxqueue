@@ -118,9 +118,11 @@ docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
 .PHONY: build-postgres
+build-postgres:
 	docker build -f build/postgres/Dockerfile -t ${POSTGRES_IMAGE} .
 
 .PHONY: build-scheduler 
+build-scheduler:
 	docker build -t ${SCHEDULER_IMAGE} ./build/scheduler
 
 .PHONY: build-all

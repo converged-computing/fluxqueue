@@ -14,12 +14,13 @@ CREATE TABLE pending_queue (
     object bytea NOT NULL,
     namespace TEXT NOT NULL,
     name TEXT NOT NULL,
-    type TEXT NOT NULL,
+    type INTEGER NOT NULL,
     reservation INTEGER NOT NULL,
     duration INTEGER NOT NULL,
     created_at timestamptz NOT NULL default NOW(),    
-    size INTEGER NOT NULL,
+    size INTEGER NOT NULL
 );
+
 CREATE UNIQUE INDEX pending_index ON pending_queue (name, namespace);
 
 -- We only need the fluxid for a reservation

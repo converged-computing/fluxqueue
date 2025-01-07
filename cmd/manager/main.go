@@ -44,7 +44,6 @@ import (
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/internal/controller"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue"
-	"github.com/riverqueue/river"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -164,8 +163,9 @@ func main() {
 	// Create the queue
 	ctx := context.Background()
 	queue, err := fluxqueue.NewQueue(ctx)
+	//queue := &fluxqueue.Queue{}
 	if err != nil {
-		setupLog.Error(err, "Issue with Fluxnetes queue")
+		setupLog.Error(err, "Issue with Flux queue")
 	}
 	c, err := rest.HTTPClientFor(mgr.GetConfig())
 	if err != nil {
@@ -192,9 +192,11 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "creating FluxJob reconciler")
 	}
-	reconciler.InitFluxion(ctx, policy)
-
-	// defer fluxCli.Close()
+	err = reconciler.InitFluxion(ctx, policy)
+	if err != nil {
+		setupLog.Error(err, "initializing Fluxion")
+	}
+	defer fluxCli.Close()
 
 	// Init cluster (or get state)
 
@@ -220,7 +222,7 @@ func main() {
 	}
 
 	// Ensure the queue stops when we exit
-	defer queue.Pool.Close()
+	//defer queue.Pool.Close()
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
@@ -228,7 +230,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	waitForJob := func(subscribeChan <-chan *river.Event) {
+	/*waitForJob := func(subscribeChan <-chan *river.Event) {
 		for {
 			select {
 			case event := <-subscribeChan:
@@ -246,6 +248,6 @@ func main() {
 	err = queue.Stop(ctx)
 	if err != nil {
 		setupLog.Error(err, "Failed to stop FluxQueue")
-	}
+	}*/
 	<-ctx.Done()
 }

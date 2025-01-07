@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/compspec/jobspec-go v0.0.0-20240510054255-ee02cdc7d3d4
-	github.com/converged-computing/fluxion v0.0.0-20240503214112-529ef2254bd9
+	github.com/converged-computing/fluxion v0.0.0-20250105140137-04388a62d0fa
 	github.com/jackc/pgx v3.6.2+incompatible
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/onsi/ginkgo/v2 v2.19.0

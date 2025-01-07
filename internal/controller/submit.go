@@ -39,7 +39,7 @@ func (r *FluxJobReconciler) submitJob(spec *api.FluxJob) (ctrl.Result, error) {
 		deleteJob = true
 
 	} else if enqueueStatus == types.JobEnqueueSuccess {
-		rlog.Error(err, "job was added to pending", "Namespace", spec.Namespace, "Name", spec.Name)
+		rlog.Info("job was added to pending", "Namespace", spec.Namespace, "Name", spec.Name)
 
 		// This is usually a database error or similar
 	} else if enqueueStatus == types.Unknown {

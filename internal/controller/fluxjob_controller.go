@@ -44,6 +44,7 @@ type FluxJobReconciler struct {
 	Fluxion    fluxion.Client
 }
 
+// NewFluxJobReconciler creates a new reconciler with clients, a Queue, and Fluxion client
 func NewFluxJobReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
@@ -61,6 +62,11 @@ func NewFluxJobReconciler(
 		Fluxion:    fluxCli,
 	}
 }
+
+// +kubebuilder:rbac:groups="",resources=nodes;events,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs/status,verbs=get;update;patch
@@ -104,7 +110,7 @@ func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, nil
 	}
 
-	// Submit the job to the queue
+	// Submit the job to the queue - TODO if error, should delete?
 	// If we are successful, update the status
 	result, err = r.submitJob(&spec)
 	if err == nil {

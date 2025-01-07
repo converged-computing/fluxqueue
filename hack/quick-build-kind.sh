@@ -17,13 +17,16 @@ kind load docker-image ${REGISTRY}/fluxqueue-postgres:latest
 kind load docker-image ${REGISTRY}/fluxqueue-scheduler:latest
 
 # And then install using the charts. The pull policy ensures we use the loaded ones
-helm uninstall fluxqueue --namespace fluxqueue-system || true
+helm uninstall fluxqueue --namespace fluxqueue-system --wait || true
 
 # So we don't try to interact with old webhook, etc.
 sleep 5
 helm install \
-  --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
+  --set controllerManager.manager.image.repository=${REGISTRY}/fluxqueue \
+  --set controllerManager.manager.image.tag=latest \
   --set scheduler.image=${REGISTRY}/fluxqueue-scheduler:latest \
+  --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
+  --set controllerManager.manager.imagePullPolicy=Never \
   --namespace fluxqueue-system \
   --create-namespace \
   --set scheduler.pullPolicy=Never \

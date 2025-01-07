@@ -9,6 +9,7 @@ import (
 	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	"github.com/converged-computing/fluxqueue/pkg/jgf"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
@@ -34,12 +35,10 @@ func (r *FluxJobReconciler) InitFluxion(ctx context.Context, policy string) erro
 	if err != nil {
 		return err
 	}
-	p := "{}"
-	if policy != "" {
-		p = string("{\"matcher_policy\": \"" + policy + "\"}")
-		rlog.Info("match policy", "Policy", policy)
-	}
-	request := &pb.InitRequest{Policy: p, Jgf: string(jgf)}
+	graph := string(jgf)
+	// fmt.Println(graph)
+	rlog.Info("match policy", "Policy", policy)
+	request := &pb.InitRequest{Policy: policy, Jgf: graph}
 	response, err := r.Fluxion.Init(ctx, request)
 	if err != nil {
 		return err
@@ -84,8 +83,7 @@ func (r *FluxJobReconciler) createInClusterJGF(filename, skipLabel string) error
 	// TODO for follow up / next PR:
 	// Metrics / summary should be an attribute of the JGF outer flux graph
 	// Resources should come in from entire group (and not repres. pod)
-	var totalAllocCpu int64
-	totalAllocCpu = 0
+	var totalAllocCpu int64 = 0
 
 	// Keep a lookup of subnet nodes in case we see one twice
 	// We don't want to create a new entity for it in the graph
@@ -146,28 +144,28 @@ func (r *FluxJobReconciler) createInClusterJGF(filename, skipLabel string) error
 		}
 
 		// These are requests for existing pods, for cpu and memory
-		//reqs := computeTotalRequests(pods)
-		//cpuReqs := reqs[corev1.ResourceCPU]
-		//memReqs := reqs[corev1.ResourceMemory]
+		reqs := computeTotalRequests(pods)
+		cpuReqs := reqs[corev1.ResourceCPU]
+		memReqs := reqs[corev1.ResourceMemory]
 
 		// Actual values that we have available (minus requests)
-		//totalCpu := node.Status.Allocatable.Cpu().MilliValue()
-		//totalMem := node.Status.Allocatable.Memory().Value()
+		totalCpu := node.Status.Allocatable.Cpu().MilliValue()
+		totalMem := node.Status.Allocatable.Memory().Value()
 
 		// Values accounting for requests
-		//availCpu := int64((totalCpu - cpuReqs.MilliValue()) / 1000)
-		//availMem := totalMem - memReqs.Value()
+		availCpu := int64((totalCpu - cpuReqs.MilliValue()) / 1000)
+		availMem := totalMem - memReqs.Value()
 
 		// Show existing to compare to
 		fmt.Printf("\n📦️ %s\n", node.GetName())
-		//		fmt.Printf("      allocated cpu: %d\n", cpuReqs.Value())
-		//		fmt.Printf("      allocated mem: %d\n", memReqs.Value())
-		//		fmt.Printf("      available cpu: %d\n", availCpu)
-		fmt.Printf("       running pods: %d\n", len(pods.Items))
+		fmt.Printf("      allocated cpu: %d\n", cpuReqs.Value())
+		fmt.Printf("      available cpu: %d\n", availCpu)
+		fmt.Printf("      allocated mem: %d\n", memReqs.Value())
+		fmt.Printf("      available mem: %d\n", availMem)
+		fmt.Printf("       running pods: %d\n\n", len(pods.Items))
 
 		// keep track of overall total
-		//		totalAllocCpu += availCpu
-		//		fmt.Printf("      available mem: %d\n", availMem)
+		totalAllocCpu += availCpu
 		gpuAllocatable, hasGpuAllocatable := node.Status.Allocatable["nvidia.com/gpu"]
 
 		// TODO possibly look at pod resources vs. node.Status.Allocatable
@@ -196,21 +194,20 @@ func (r *FluxJobReconciler) createInClusterJGF(filename, skipLabel string) error
 		}
 
 		// Here is where we are adding cores
-		/*for index := 0; index < int(availCpu); index++ {
+		for index := 0; index < int(availCpu); index++ {
 			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
 			coreNode := fluxgraph.MakeCore(jgf.CoreType, subpath, int64(index))
 			fluxgraph.MakeBidirectionalEdge(computeNode.Id, coreNode.Id)
-		}*/
+		}
 
 		// Here is where we are adding memory
-		/*		fractionMem := availMem >> 30
-				for i := 0; i < int(fractionMem); i++ {
-					subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
-					memoryNode := fluxgraph.MakeMemory(jgf.MemoryType, subpath, 1<<10, int64(i))
-					fluxgraph.MakeBidirectionalEdge(computeNode.Id, memoryNode.Id)
-				}*/
+		fractionMem := availMem >> 30
+		for i := 0; i < int(fractionMem); i++ {
+			subpath := fmt.Sprintf("%s/%s", subnetNode.Metadata.Name, computeNode.Metadata.Name)
+			memoryNode := fluxgraph.MakeMemory(jgf.MemoryType, subpath, 1<<10, int64(i))
+			fluxgraph.MakeBidirectionalEdge(computeNode.Id, memoryNode.Id)
+		}
 	}
-	fmt.Printf("\nCan request at most %d exclusive cpu", totalAllocCpu)
 
 	// Get the jgf back as bytes, and we will return string
 	err = fluxgraph.WriteJGF(filename)
@@ -221,10 +218,10 @@ func (r *FluxJobReconciler) createInClusterJGF(filename, skipLabel string) error
 }
 
 // computeTotalRequests sums up the pod requests for the list. We do not consider limits.
-/*func computeTotalRequests(podList *corev1.PodList) map[corev1.ResourceName]resource.Quantity {
+func computeTotalRequests(podList *corev1.PodList) map[corev1.ResourceName]resource.Quantity {
 	total := map[corev1.ResourceName]resource.Quantity{}
 	for _, pod := range podList.Items {
-		podReqs, _ := resourcehelper.PodRequestsAndLimits(&pod)
+		podReqs, _ := PodRequestsAndLimits(&pod)
 		for podReqName, podReqValue := range podReqs {
 			if v, ok := total[podReqName]; !ok {
 				total[podReqName] = podReqValue
@@ -235,10 +232,4 @@ func (r *FluxJobReconciler) createInClusterJGF(filename, skipLabel string) error
 		}
 	}
 	return total
-}*/
-
-type allocation struct {
-	Type      string
-	Basename  string
-	CoreCount int
 }

@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jackc/pgx/pgtype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -276,18 +275,27 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 	}
 
 	// We use the CRD creation timestamp
-	ts := &pgtype.Timestamptz{Time: spec.ObjectMeta.CreationTimestamp.Time}
+	// ts := &pgtype.Timestamptz{Time: spec.ObjectMeta.CreationTimestamp.Time}
+
+	// Reservation needs to be integer
+	reservation := 0
+	if spec.Spec.Reservation {
+		reservation = 1
+	}
 
 	// Insert into pending queue, only if name and namespace don't exist.
+	// TODO figure out how to do timestamp. By default it will use inserted.
 	_, err = pool.Exec(context.Background(), queries.InsertIntoPending,
-		spec.Spec.Object,
 		spec.Spec.JobSpec,
-		spec.Name, spec.Namespace,
+		spec.Spec.Object,
+		spec.Name,
+		spec.Namespace,
 		spec.Spec.Type,
-		spec.Spec.Reservation,
+		reservation,
 		spec.Spec.Duration,
-		ts, spec.Spec.Nodes,
+		spec.Spec.Nodes,
 	)
+
 	// If unknown, we won't give status submit, and it should requeue to try again
 	if err != nil {
 		klog.Infof("Error inserting job %s/%s into pending queue", spec.Namespace, spec.Name)

@@ -59,7 +59,7 @@ spec:
           - --health-probe-bind-address=:8081
           - --policy=lonode
         image: controller:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         name: manager
         env:
           - name: DATABASE_URL
@@ -92,7 +92,9 @@ spec:
               - |
                 status=$(curl -ks http://localhost:8081/readyz); if [ "$status" != "ok" ]; then exit 1; fi
                 pg_isready -d postgres -h postgres -p 5432 -U postgres;
-        #readinessProbe:
+          initialDelaySeconds: 20
+          periodSeconds: 20
+        # readinessProbe:
         #  httpGet:
         #    path: /readyz
         #    port: 8081
@@ -109,7 +111,7 @@ spec:
             memory: 64Mi
       # This container provides the fluxion service
       - image: ghcr.io/converged-computing/fluxion:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         command:
         - /code/bin/server
         - --port=4242

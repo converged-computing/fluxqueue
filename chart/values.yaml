@@ -17,12 +17,13 @@ controllerManager:
     image:
       repository: ghcr.io/converged-computing/fluxion
       tag: latest
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
   manager:
     args:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
+    - --policy=lonode
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -36,8 +37,8 @@ controllerManager:
       pgport: "5432"
     image:
       repository: ghcr.io/converged-computing/fluxqueue
-      tag: latest
-    imagePullPolicy: IfNotPresent
+      tag: test
+    imagePullPolicy: Never
     resources:
       limits:
         cpu: 500m

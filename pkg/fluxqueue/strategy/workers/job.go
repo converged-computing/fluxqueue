@@ -3,11 +3,14 @@ package workers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
+	"github.com/jackc/pgx/v5/pgxpool"
 	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -76,7 +79,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 
 	// Prepare the request to allocate.
 	// TODO add reservation
-	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec}
+	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// An error here is an error with making the request, nothing about
 	// the match/allocation itself.
@@ -89,16 +92,14 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	// Convert the response into an error code that indicates if we should run again.
 	// If we have an allocation, the job/etc must be un-suspended or released
 	// The database also needs to be updated (not sure how to do that yet)
-	//pool, err := pgxpool.New(fluxionCtx, os.Getenv("DATABASE_URL"))
+	pool, err := pgxpool.New(fluxionCtx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		return err
 	}
 
 	// Not reserved AND not allocated indicates not possible
 	if !response.Reserved && response.GetAllocation() == "" {
-		errorMessage := fmt.Sprintf("Fluxion could not allocate nodes for %s, likely Unsatisfiable", job.Args.Name)
-		klog.Info(errorMessage)
-		return river.JobCancel(fmt.Errorf(errorMessage))
+		return river.JobCancel(fmt.Errorf("fluxion could not allocate nodes for %s/%s, likely Unsatisfiable", job.Args.Namespace, job.Args.Name))
 	}
 
 	// Flux job identifier (known to fluxion)
@@ -106,13 +107,13 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 
 	// If it's reserved, we need to add the id to our reservation table
 	// TODO need to clean up this table...
-	//	if response.Reserved {
-	//		rRows, err := pool.Query(fluxionCtx, queries.AddReservationQuery, job.Args.GroupName, fluxID)
-	//		if err != nil {
-	//			return err
-	//		}
-	//		defer rRows.Close()
-	//	}
+	if response.Reserved {
+		rRows, err := pool.Query(fluxionCtx, queries.AddReservationQuery, job.Args.Name, fluxID)
+		if err != nil {
+			return err
+		}
+		defer rRows.Close()
+	}
 
 	// This means we didn't get an allocation - we might have a reservation (to do
 	// something with later) but for now we just print it.
@@ -128,17 +129,9 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 
 	// Get the nodelist and serialize into list of strings for job args
 	// TODO need function to get nodelist
-	//nodelist := response.Allocation
-
-	// We assume that each node gets N tasks
-	nodes := []string{}
-	//for _, node := range nodelist {
-	//	for i := 0; i < int(node.Tasks); i++ {
-	//		nodes = append(nodes, node.NodeID)
-	//	}
-	//}
+	nodes := strings.Split(response.Allocation, ",")
 	nodeStr := strings.Join(nodes, ",")
-
+	fmt.Println(nodeStr)
 	// Update nodes for the job
 	//	rows, err := pool.Query(fluxionCtx, queries.UpdateNodesQuery, nodeStr, job.ID)
 	//	if err != nil {
@@ -156,13 +149,12 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	// there is a deadline set. We can't set a deadline for services, etc.
 	// This is here instead of responding to deletion / termination since a job might
 	// run longer than the duration it is allowed.
-	if job.Args.Duration > 0 {
-		// err = SubmitCleanup(ctx, pool, pod.Spec.ActiveDeadlineSeconds, job.Args.Podspec, int64(fluxID), true, []string{})
-		//if err != nil {
-		//	return err
-		//}
-	}
-	klog.Infof("[WORK] nodes allocated %s for group %s (flux job id %d)\n",
-		nodeStr, job.Args.Name, fluxID)
+	//if job.Args.Duration > 0 {
+	// err = SubmitCleanup(ctx, pool, pod.Spec.ActiveDeadlineSeconds, job.Args.Podspec, int64(fluxID), true, []string{})
+	//if err != nil {
+	//	return err
+	//}
+	//}
+	wlog.Info("[WORK] nodes allocated for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
 	return nil
 }
