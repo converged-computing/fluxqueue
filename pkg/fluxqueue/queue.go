@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +24,7 @@ import (
 
 const (
 	queueMaxWorkers = 10
+	mutexLocked     = 1
 )
 
 // Queue holds handles to queue database and event handles
@@ -35,6 +38,9 @@ type Queue struct {
 	// IMPORTANT: subscriptions need to use same context
 	// that client submit them uses
 	Context context.Context
+
+	// Lock the queue during a scheduling cycle
+	lock sync.Mutex
 
 	// Reservation depth:
 	// Less than -1 is invalid (and throws error)
@@ -50,6 +56,16 @@ type ChannelFunction func()
 type QueueEvent struct {
 	Channel  <-chan *river.Event
 	Function ChannelFunction
+}
+
+// IsInScheduleLoop looks at the state of the mutex to determine if it is locked
+// If it's locked, we are in a loop and return true. Otherwise, false.
+func (q *Queue) IsInScheduleLoop() bool {
+
+	// the mutex object has a private variable, state,
+	// that will be 1 when locked
+	state := reflect.ValueOf(&q.lock).Elem().FieldByName("state")
+	return state.Int()&mutexLocked == mutexLocked
 }
 
 // NewQueue starts a new queue with a river client
@@ -250,10 +266,9 @@ func (q *Queue) GetInformer() error { //cache.SharedIndexInformer {
 	//	return podsInformer
 }
 
-// Enqueue a new job to the pending queue
+// Enqueue a new job to the pending queue, which is just a database table
 // This functionality is shared across strategies. We add the jobs
 // as they are submit to Kubernetes
-// This parent function passes the jobspec onto the queue strategy
 func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
@@ -298,7 +313,6 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 
 	// If unknown, we won't give status submit, and it should requeue to try again
 	if err != nil {
-		klog.Infof("Error inserting job %s/%s into pending queue", spec.Namespace, spec.Name)
 		return types.Unknown, err
 	}
 	return types.JobEnqueueSuccess, nil
@@ -306,22 +320,33 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 
 // Schedule assesses jobs in pending to be sent to Fluxion.
 // The strategy determines which get chosen (e.g., scheduled at time or priority)
+// TODO: we need another mechanism to kick off the queue
 func (q *Queue) Schedule() error {
-	//batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
-	//if err != nil {
-	//	return err
-	//}
 
-	//if len(batch) > 0 {
-	//	count, err := q.riverClient.InsertMany(q.Context, batch)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	klog.Info(count)
-	//}
+	// Don't kick off another loop if we are already in one
+	if q.IsInScheduleLoop() {
+		return nil
+	}
+	// Acquire the lock
+	q.lock.Lock()         // Acquire the lock
+	defer q.lock.Unlock() // Release the lock when the function exits
+
+	// This generates a batch of jobs to send to ask Fluxion for nodes
+	batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
+	if err != nil {
+		return err
+	}
+
+	if len(batch) > 0 {
+		count, err := q.riverClient.InsertMany(q.Context, batch)
+		if err != nil {
+			return err
+		}
+		klog.Info(count)
+	}
 
 	// Post submit functions
-	return q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
+	return nil // q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
 }
 
 // GetCreationTimestamp returns the creation time of a podGroup or a pod in seconds (time.MicroTime)

@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 FROM golang:1.22
 WORKDIR /
 USER root
-RUN apt-get update && apt-get install -y postgresql less && apt-get clean
+RUN apt-get update && apt-get install -y postgresql less vim && apt-get clean
 COPY --from=builder /workspace/manager .
 # USER 65532:65532
 

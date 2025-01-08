@@ -77,15 +77,16 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
-	// Prepare the request to allocate.
-	// TODO add reservation
+	// Prepare the request to allocate - convert string to bytes
+	fmt.Println(job.Args.Jobspec)
 	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// An error here is an error with making the request, nothing about
 	// the match/allocation itself.
 	response, err := w.fluxion.Match(fluxionCtx, request)
+	fmt.Println(response)
 	if err != nil {
-		klog.Error("[WORK] Fluxion did not receive any match response", err)
+		wlog.Info("[WORK] Fluxion did not receive any match response", err)
 		return err
 	}
 

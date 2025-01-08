@@ -42,6 +42,9 @@ type FluxJobReconciler struct {
 	RESTConfig *rest.Config
 	Queue      *fluxqueue.Queue
 	Fluxion    fluxion.Client
+
+	// Defaults for fluxion / scheduling
+	Duration int
 }
 
 // NewFluxJobReconciler creates a new reconciler with clients, a Queue, and Fluxion client
@@ -114,11 +117,16 @@ func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// If we are successful, update the status
 	result, err = r.submitJob(&spec)
 	if err == nil {
-		result, err = r.updateStatus(&spec, api.SubmitStatusSubmit)
+		err = r.updateStatus(&spec, api.SubmitStatusSubmit)
 	} else {
-		result, err = r.updateStatus(&spec, api.SubmitStatusError)
+		err = r.updateStatus(&spec, api.SubmitStatusError)
 	}
 	return result, err
+}
+
+// Set default duration
+func (r *FluxJobReconciler) SetDuration(duration int) {
+	r.Duration = duration
 }
 
 // SetupWithManager sets up the controller with the Manager.

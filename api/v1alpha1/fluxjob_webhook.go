@@ -131,6 +131,7 @@ func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
 		pod.Name,
 		pod.Namespace,
 		1,
+		pod.Spec.Containers,
 	)
 }
 
@@ -165,5 +166,6 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 		job.Name,
 		job.Namespace,
 		*job.Spec.Parallelism,
+		job.Spec.Template.Spec.Containers,
 	)
 }

@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	fluxion "github.com/converged-computing/fluxion/pkg/client"
+	"github.com/riverqueue/river"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -66,6 +67,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var jobDuration int
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -74,6 +76,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.IntVar(&jobDuration, "duration", 0, "Job duration, defaults to 0 to indicate unset")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
@@ -163,7 +166,6 @@ func main() {
 	// Create the queue
 	ctx := context.Background()
 	queue, err := fluxqueue.NewQueue(ctx)
-	//queue := &fluxqueue.Queue{}
 	if err != nil {
 		setupLog.Error(err, "Issue with Flux queue")
 	}
@@ -189,6 +191,10 @@ func main() {
 		queue,
 		fluxCli,
 	)
+
+	// Set defaults for duration
+	reconciler.SetDuration(jobDuration)
+
 	if err != nil {
 		setupLog.Error(err, "creating FluxJob reconciler")
 	}
@@ -222,7 +228,7 @@ func main() {
 	}
 
 	// Ensure the queue stops when we exit
-	//defer queue.Pool.Close()
+	defer queue.Pool.Close()
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
@@ -230,7 +236,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	/*waitForJob := func(subscribeChan <-chan *river.Event) {
+	waitForJob := func(subscribeChan <-chan *river.Event) {
 		for {
 			select {
 			case event := <-subscribeChan:
@@ -248,6 +254,6 @@ func main() {
 	err = queue.Stop(ctx)
 	if err != nil {
 		setupLog.Error(err, "Failed to stop FluxQueue")
-	}*/
+	}
 	<-ctx.Done()
 }
