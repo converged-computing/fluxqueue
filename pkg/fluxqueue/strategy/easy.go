@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 
+	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 
 	"github.com/jackc/pgx/v5"
@@ -46,13 +47,13 @@ type ReservationModel struct {
 // AddtWorkers adds the worker for the queue strategy
 // job worker: a queue to submit jobs to fluxion
 // cleanup worker: a queue to cleanup
-func (EasyBackfill) AddWorkers(workers *river.Workers) error {
-	jobWorker, err := work.NewJobWorker()
+func (EasyBackfill) AddWorkers(workers *river.Workers, cfg rest.Config) error {
+	jobWorker, err := work.NewJobWorker(cfg)
 	if err != nil {
 		return err
 	}
 
-	cleanupWorker, err := work.NewCleanupWorker()
+	cleanupWorker, err := work.NewCleanupWorker(cfg)
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func (s EasyBackfill) Schedule(
 	// Each will run AskFlux (to fluxion) to attempt schedule
 	jobs, err := s.ReadyJobs(ctx, pool)
 	if err != nil {
-		elog.Error(err, "issue FCFS with backfill querying for ready groups")
+		elog.Error(err, "Issue FCFS with backfill querying for ready groups")
 		return nil, err
 	}
 
@@ -138,9 +139,9 @@ func (s EasyBackfill) ReadyJobs(ctx context.Context, pool *pgxpool.Pool) ([]work
 	for _, model := range models {
 		jobArgs := workers.JobArgs{
 			Jobspec:     model.JobSpec,
-			Object:      model.Object,
 			Name:        model.Name,
 			Namespace:   model.Namespace,
+			FluxJobName: model.FluxJobName,
 			Type:        model.Type,
 			Reservation: model.Reservation,
 			Size:        model.Size,

@@ -14,6 +14,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivershared/util/slogutil"
+	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
@@ -40,7 +41,8 @@ type Queue struct {
 	Context context.Context
 
 	// Lock the queue during a scheduling cycle
-	lock sync.Mutex
+	lock       sync.Mutex
+	RESTClient rest.Interface
 
 	// Reservation depth:
 	// Less than -1 is invalid (and throws error)
@@ -69,7 +71,7 @@ func (q *Queue) IsInScheduleLoop() bool {
 }
 
 // NewQueue starts a new queue with a river client
-func NewQueue(ctx context.Context) (*Queue, error) {
+func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		return nil, err
@@ -82,7 +84,7 @@ func NewQueue(ctx context.Context) (*Queue, error) {
 	workers := river.NewWorkers()
 
 	// Each strategy has its own worker type
-	err = strategy.AddWorkers(workers)
+	err = strategy.AddWorkers(workers, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -178,76 +180,6 @@ func (q *Queue) setupEvents() {
 	return int64(fluxID), err
 }*/
 
-// Get all pods in a group
-/*func (q *Queue) GetGroupPods(namespace, groupName string) ([]*corev1.Pod, error) {
-	podlist := []*corev1.Pod{}
-	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
-	if err != nil {
-		klog.Errorf("Issue creating new pool %s", err)
-		return podlist, err
-	}
-	defer pool.Close()
-
-	podRows, err := pool.Query(q.Context, queries.GetPodsQuery, groupName, namespace)
-	if err != nil {
-		klog.Infof("GetPodsQuery Error: query for pods for group %s: %s", groupName, err)
-		return nil, err
-	}
-	pods, err := pgx.CollectRows(podRows, pgx.RowToStructByName[types.PodModel])
-	if err != nil {
-		klog.Infof("GetPodsQuery Error: collect rows for groups %s: %s", groupName, err)
-		return nil, err
-	}
-
-	// We need to get a live pod to determine if it is done
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-
-	// Assemble one podspec, and list of pods that we will need
-	for _, item := range pods {
-		// Get the live pod with the API, ignore not found
-		pod, err := clientset.CoreV1().Pods(namespace).Get(q.Context, item.Name, metav1.GetOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			klog.Infof("Error retrieving Pod %s/%s: %s", namespace, item.Name, err)
-		} else {
-			podlist = append(podlist, pod)
-		}
-	}
-	return podlist, nil
-}*/
-
-// Get a pod (Podspec) on demand
-// We need to be able to do this to complete a scheduling cycle
-// This podSpec will eventually need to go into the full request to
-// ask fluxion for nodes, right now we still use a single representative one
-/*
-func (q *Queue) GetPodSpec(namespace, name, groupName string) (*corev1.Pod, error) {
-
-	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
-	if err != nil {
-		klog.Errorf("Issue creating new pool %s", err)
-		return nil, err
-	}
-	defer pool.Close()
-
-	var podspec string
-	result := pool.QueryRow(context.Background(), queries.GetPodspecQuery, groupName, name, namespace)
-	err = result.Scan(&podspec)
-	if err != nil {
-		klog.Infof("Error scanning podspec for %s/%s", namespace, name)
-		return nil, err
-	}
-	var pod corev1.Pod
-	err = json.Unmarshal([]byte(podspec), &pod)
-	return &pod, err
-}*/
-
 // GetInformer returns the pod informer to run as a go routine
 // TODO this should be done through the operator, and then triggered here
 func (q *Queue) GetInformer() error { //cache.SharedIndexInformer {
@@ -278,7 +210,7 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 	}
 	defer pool.Close()
 
-	// First check - a job that is already in pending (unique by name and namespace)
+	// First check - a job that is already in pending (unique by flux job name and namespace)
 	// is not allowed to be submit again. The job is either waiting or running.
 	result, err := pool.Exec(context.Background(), queries.IsPendingQuery, spec.Name, spec.Namespace)
 	if err != nil {
@@ -302,9 +234,9 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 	// TODO figure out how to do timestamp. By default it will use inserted.
 	_, err = pool.Exec(context.Background(), queries.InsertIntoPending,
 		spec.Spec.JobSpec,
-		spec.Spec.Object,
-		spec.Name,
+		spec.Name, // flux job name
 		spec.Namespace,
+		spec.Spec.Name, // original job name
 		spec.Spec.Type,
 		reservation,
 		spec.Spec.Duration,

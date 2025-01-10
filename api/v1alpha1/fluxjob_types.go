@@ -36,6 +36,11 @@ const (
 	SubmitStatusCancel SubmitStatus = "statusCancel"
 )
 
+// String returns the stringified type
+func (w JobWrapped) String() string {
+	return fmt.Sprintf("%d", w)
+}
+
 // GetJobName creates a job name that appends the type
 func GetJobName(jobType JobWrapped, name string) string {
 	switch jobType {
@@ -71,6 +76,10 @@ type FluxJobSpec struct {
 	// Type of object that is wrapped
 	// +optional
 	Type JobWrapped `json:"type"`
+
+	// Original name of the job
+	// +optional
+	Name string `json:"name"`
 
 	// Object is the underlying pod/job/object specification
 	// This currently is assumed that one job has equivalent pods under it

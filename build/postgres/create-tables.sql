@@ -11,8 +11,8 @@
 -- A single row for each group
 CREATE TABLE pending_queue (
     jobspec TEXT NOT NULL,
-    object bytea NOT NULL,
     namespace TEXT NOT NULL,
+    flux_job_name TEXT NOT NULL,
     name TEXT NOT NULL,
     type INTEGER NOT NULL,
     reservation INTEGER NOT NULL,

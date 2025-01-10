@@ -59,6 +59,9 @@ spec:
               jobspec:
                 description: JobSpec is the Flux jobspec
                 type: string
+              name:
+                description: Original name of the job
+                type: string
               nodes:
                 description: Nodes needed for the job
                 format: int32

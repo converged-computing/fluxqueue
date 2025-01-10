@@ -165,10 +165,6 @@ func main() {
 
 	// Create the queue
 	ctx := context.Background()
-	queue, err := fluxqueue.NewQueue(ctx)
-	if err != nil {
-		setupLog.Error(err, "Issue with Flux queue")
-	}
 	c, err := rest.HTTPClientFor(mgr.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to create REST HTTP client", "controller", c)
@@ -176,6 +172,11 @@ func main() {
 	restClient, err := apiutil.RESTClientForGVK(gvk, false, mgr.GetConfig(), serializer.NewCodecFactory(mgr.GetScheme()), c)
 	if err != nil {
 		setupLog.Error(err, "unable to create REST client", "controller", restClient)
+	}
+
+	queue, err := fluxqueue.NewQueue(ctx, *mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "Issue with Flux queue")
 	}
 
 	// Create fluxion client, this will init fluxion with the cluster state

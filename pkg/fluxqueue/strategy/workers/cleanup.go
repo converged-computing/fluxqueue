@@ -18,7 +18,6 @@ import (
 
 	klog "k8s.io/klog/v2"
 
-	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/defaults"
 
@@ -40,23 +39,13 @@ func (args CleanupArgs) Kind() string { return "cleanup" }
 
 type CleanupWorker struct {
 	river.WorkerDefaults[CleanupArgs]
-	fluxion client.Client
+	RESTConfig rest.Config
 }
 
 // NewJobWorker returns a new job worker with a Fluxion client
-func NewCleanupWorker() (*CleanupWorker, error) {
-	worker := CleanupWorker{}
-
-	// This is the host where fluxion is running, will be localhost 4242 for sidecar
-	// Note that this design isn't ideal - we should be calling this just once
-	c, err := client.NewClient("127.0.0.1:4242")
-	if err != nil {
-		klog.Error(err, "[WORK] Fluxion error connecting to server")
-		return nil, err
-	}
-	worker.fluxion = c
-	//	defer worker.fluxion.Close()
-	return &worker, err
+func NewCleanupWorker(cfg rest.Config) (*CleanupWorker, error) {
+	worker := CleanupWorker{RESTConfig: cfg}
+	return &worker, nil
 }
 
 // SubmitCleanup submits a cleanup job N seconds into the future

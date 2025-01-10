@@ -20,6 +20,8 @@ data:
           disabled:
            - name: FluxionScheduler
         filter:
+          enabled:
+          - name: FluxionScheduler
           disabled:
           - name: NodePorts
           - name: VolumeRestrictions
@@ -110,6 +112,8 @@ data:
           - name: NodeResourcesBalancedAllocation
           - name: ImageLocality
         preFilter:
+          enabled:
+          - name: FluxionScheduler
           disabled:
           - name: NodePorts
           - name: VolumeRestrictions

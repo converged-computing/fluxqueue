@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"k8s.io/client-go/rest"
 )
 
 // Interface for a queue strategy
@@ -15,7 +16,7 @@ import (
 type QueueStrategy interface {
 	Name() string
 
-	AddWorkers(*river.Workers) error
+	AddWorkers(*river.Workers, rest.Config) error
 
 	// Schedule takes pending pods and submits to fluxion
 	Schedule(context.Context, *pgxpool.Pool, int32) ([]river.InsertManyParams, error)

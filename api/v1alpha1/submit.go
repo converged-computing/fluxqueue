@@ -25,7 +25,6 @@ var (
 func SubmitFluxJob(
 	ctx context.Context,
 	jobType JobWrapped,
-	spec []byte,
 	name string,
 	namespace string,
 	nodes int32,
@@ -73,14 +72,7 @@ func SubmitFluxJob(
 		return err
 	}
 
-	//	asJson, err := js.JobspecToYaml()
-	//	if err != nil {
-	//		slog.Error(err, "Issue with serializing jobspec to json")
-	//		return err
-	//	}
-
 	// If we get here, create!
-	//	fmt.Println(asYaml)
 	slog.Info("Creating flux job ", "Namespace", namespace, "Name", jobName)
 
 	// Define the Flux Job
@@ -88,9 +80,9 @@ func SubmitFluxJob(
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace},
 		Spec: FluxJobSpec{
 			JobSpec: jsString,
-			Object:  spec,
 			Nodes:   nodes,
 			Type:    jobType,
+			Name:    name,
 		},
 		Status: FluxJobStatus{
 			SubmitStatus: SubmitStatusNew,

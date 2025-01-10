@@ -22,7 +22,7 @@ const (
 // This should map back into the FluxJob
 type JobModel struct {
 	JobSpec     string `db:"jobspec"`
-	Object      []byte `db:"object"`
+	FluxJobName string `db:"flux_job_name"`
 	Name        string `db:"name"`
 	Namespace   string `db:"namespace"`
 	Type        string `db:"type"`
