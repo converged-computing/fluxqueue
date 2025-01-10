@@ -78,6 +78,9 @@ spec:
               jobspec:
                 description: JobSpec is the Flux jobspec
                 type: string
+              name:
+                description: Original name of the job
+                type: string
               nodes:
                 description: Nodes needed for the job
                 format: int32
@@ -108,6 +111,9 @@ spec:
             type: object
           status:
             description: FluxJobStatus defines the observed state of FluxJob
+            properties:
+              submitStatus:
+                type: string
             type: object
         type: object
     served: true
@@ -220,6 +226,51 @@ kind: ClusterRole
 metadata:
   name: fluxqueue-manager-role
 rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - jobs.converged-computing.org
   resources:
@@ -381,6 +432,7 @@ spec:
         - --metrics-bind-address=:8443
         - --leader-elect
         - --health-probe-bind-address=:8081
+        - --policy=lonode
         command:
         - /manager
         env:
@@ -395,7 +447,7 @@ spec:
         - name: PGPASSWORD
           value: postgres
         image: ghcr.io/converged-computing/fluxqueue:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         livenessProbe:
           httpGet:
             path: /healthz
@@ -408,11 +460,15 @@ spec:
           name: webhook-server
           protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          exec:
+            command:
+            - bash
+            - -c
+            - |
+              status=$(curl -ks http://localhost:8081/readyz); if [ "$status" != "ok" ]; then exit 1; fi
+              pg_isready -d postgres -h postgres -p 5432 -U postgres;
+          initialDelaySeconds: 20
+          periodSeconds: 20
         resources:
           limits:
             cpu: 500m
@@ -433,7 +489,7 @@ spec:
         - /code/bin/server
         - --port=4242
         image: ghcr.io/converged-computing/fluxion:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         name: fluxion
       securityContext:
         seccompProfile:

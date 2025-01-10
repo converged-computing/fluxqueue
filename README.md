@@ -212,6 +212,12 @@ SELECT group_name, group_size from pods_provisional;
 
 ### TODO
 
+- [ ] How does fluxion work with a duration - does it remove scheduled stuff at that timestamp?
+  - Need to figure out way to coordinate fluxion time ending with cancel of pods, and cancel of pods with cancel to fluxion.
+  - The latter is OK if there is some delay, because fluxion wouldn't reassign to nodes it thinks are being used.
+  - There is mostly just the wasted resources time in that. 
+  - But we can't cancel to fluxion if pods still running on nodes - something else could be scheduled.
+- [ ] I already forgot how reservations work!
 - [ ] scheduleAt can be used to AskFlux in the future
 - [ ] Nodes that are currently assigned need to be taken into account
    - Right now they aren't included in resources, but instead should be "given" to Fluxion.

@@ -158,26 +158,8 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		wlog.Info("Error understanding job type", "Type", job.Args.Type, "Name", job.Args.Namespace, "Name", job.Args.Name)
 		return fmt.Errorf("unknown job type %s passed to fluxion schedule for job %s/%s", job.Args.Type, job.Args.Namespace, job.Args.Name)
 	}
-	// TODO: add labels to fluxion that returns just the nodes
-	// TODO: test the rest client with patch, need to add labels for nodes, and to unsuspend, fluxion scheudler
-	// TODO: add restclient from queue init in main.go so worker has it
-	// TODO update fluxion scheduler to assign to exact nodes
-	// TODO need function to get nodelist
 
-	// Update nodes for the job
-	//	rows, err := pool.Query(fluxionCtx, queries.UpdateNodesQuery, nodeStr, job.ID)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	defer rows.Close()
-
-	// Add the job id to pending (for later cleanup)
-	//	_, err = pool.Exec(fluxionCtx, queries.UpdatingPendingWithFluxID, fluxID, job.Args.GroupName, job.Args.Namespace)
-	//	if err != nil {
-	//		return err
-	//	}
-
-	// Kick off a cleaning job for when everything should be cancelled, but only if
+	// TODO Kick off a cleaning job for when everything should be cancelled, but only if
 	// there is a deadline set. We can't set a deadline for services, etc.
 	// This is here instead of responding to deletion / termination since a job might
 	// run longer than the duration it is allowed.

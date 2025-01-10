@@ -37,7 +37,7 @@ controllerManager:
       pgport: "5432"
     image:
       repository: ghcr.io/converged-computing/fluxqueue
-      tag: test
+      tag: latest
     imagePullPolicy: Never
     resources:
       limits:
