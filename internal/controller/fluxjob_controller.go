@@ -19,13 +19,15 @@ package controller
 import (
 	"context"
 
+	fluxion "github.com/converged-computing/fluxion/pkg/client"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue"
 )
 
 var (
@@ -38,21 +40,36 @@ type FluxJobReconciler struct {
 	Scheme     *runtime.Scheme
 	RESTClient rest.Interface
 	RESTConfig *rest.Config
+	Queue      *fluxqueue.Queue
+	Fluxion    fluxion.Client
+
+	// Defaults for fluxion / scheduling
+	Duration int
 }
 
+// NewFluxJobReconciler creates a new reconciler with clients, a Queue, and Fluxion client
 func NewFluxJobReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
 	restConfig *rest.Config,
 	restClient rest.Interface,
+	queue *fluxqueue.Queue,
+	fluxCli fluxion.Client,
 ) *FluxJobReconciler {
 	return &FluxJobReconciler{
 		Client:     client,
 		Scheme:     scheme,
 		RESTClient: restClient,
 		RESTConfig: restConfig,
+		Queue:      queue,
+		Fluxion:    fluxCli,
 	}
 }
+
+// +kubebuilder:rbac:groups="",resources=nodes;events,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs/status,verbs=get;update;patch
@@ -68,12 +85,48 @@ func NewFluxJobReconciler(
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
-	logger.Info("Hello!")
+	// Create a new MetricSet
+	var spec api.FluxJob
 
-	return ctrl.Result{}, nil
+	// Keep developer informed what is going on.
+	rlog.Info("🌀 Event received by FluxJob controller!")
+	rlog.Info("Request: ", "req", req)
+
+	// Does the metric exist yet (based on name and namespace)
+	err := r.Get(ctx, req.NamespacedName, &spec)
+	if err != nil {
+
+		// Create it, doesn't exist yet
+		if errors.IsNotFound(err) {
+			rlog.Info("🔴 FluxJob not found. Ignoring since object must be deleted.")
+			return ctrl.Result{}, nil
+		}
+		rlog.Info("🔴 Failed to get FluxJob. Re-running reconcile.")
+		return ctrl.Result{Requeue: true}, err
+	}
+	rlog.Info("Found FluxJob", "Name", spec.Name, "Namespace", spec.Namespace, "Status", spec.Status.SubmitStatus)
+	result := ctrl.Result{}
+
+	// If the job is already submit, continue
+	if spec.Status.SubmitStatus == api.SubmitStatusSubmit {
+		return result, nil
+	}
+
+	// Submit the job to the queue - TODO if error, should delete?
+	// If we are successful, update the status
+	result, err = r.submitJob(&spec)
+	if err == nil {
+		err = r.updateStatus(&spec, api.SubmitStatusSubmit)
+	} else {
+		err = r.updateStatus(&spec, api.SubmitStatusError)
+	}
+	return result, err
+}
+
+// Set default duration
+func (r *FluxJobReconciler) SetDuration(duration int) {
+	r.Duration = duration
 }
 
 // SetupWithManager sets up the controller with the Manager.

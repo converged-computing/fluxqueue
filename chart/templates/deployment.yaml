@@ -51,11 +51,15 @@ spec:
           name: webhook-server
           protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          exec:
+            command:
+            - bash
+            - -c
+            - |
+              status=$(curl -ks http://localhost:8081/readyz); if [ "$status" != "ok" ]; then exit 1; fi
+              pg_isready -d postgres -h postgres -p 5432 -U postgres;
+          initialDelaySeconds: 20
+          periodSeconds: 20
         resources: {{- toYaml .Values.controllerManager.manager.resources | nindent 10
           }}
         securityContext: {{- toYaml .Values.controllerManager.manager.containerSecurityContext

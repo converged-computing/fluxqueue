@@ -2,10 +2,13 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
+	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
+	jspec "github.com/converged-computing/fluxqueue/pkg/jobspec"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -22,10 +25,10 @@ var (
 func SubmitFluxJob(
 	ctx context.Context,
 	jobType JobWrapped,
-	spec []byte,
 	name string,
 	namespace string,
 	nodes int32,
+	containers []corev1.Container,
 ) error {
 
 	// Ensure we have a client that knows how to create FluxJob
@@ -48,6 +51,26 @@ func SubmitFluxJob(
 		slog.Error(err, "Issue with getting job", "Namespace", namespace, "Name", jobName)
 		return err
 	}
+	resources := jspec.GeneratePodResources(containers)
+
+	// Artifically create a command for the name and namespace
+	command := fmt.Sprintf("echo %s %s", namespace, name)
+
+	// Generate a jobspec for that many nodes (starting simple)
+	// TODO will need to add GPU and memory here... if Flux supports memory
+	js, err := jobspec.NewSimpleJobspec(name, command, nodes, resources.Cpu)
+	if err != nil {
+		slog.Error(err, "Issue with creating job", "Namespace", namespace, "Name", jobName)
+		return err
+	}
+
+	// Add a default system time to unset (this can eventually be from a label)
+	js.Attributes.System.Duration = 0
+	jsString, err := js.JobspecToYaml()
+	if err != nil {
+		slog.Error(err, "Issue with serializing jobspec to json")
+		return err
+	}
 
 	// If we get here, create!
 	slog.Info("Creating flux job ", "Namespace", namespace, "Name", jobName)
@@ -56,10 +79,13 @@ func SubmitFluxJob(
 	fluxjob := &FluxJob{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace},
 		Spec: FluxJobSpec{
-			JobSpec: "",
-			Object:  spec,
+			JobSpec: jsString,
 			Nodes:   nodes,
 			Type:    jobType,
+			Name:    name,
+		},
+		Status: FluxJobStatus{
+			SubmitStatus: SubmitStatusNew,
 		},
 	}
 	err = cli.Create(ctx, fluxjob)

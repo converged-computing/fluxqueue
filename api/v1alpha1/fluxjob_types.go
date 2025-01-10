@@ -24,15 +24,25 @@ import (
 
 // "Enum" to determine what we are wrapping
 type JobWrapped int
+type SubmitStatus string
 
 const (
 	JobWrappedPod JobWrapped = iota
 	JobWrappedJob
+
+	SubmitStatusNew    SubmitStatus = "statusNew"
+	SubmitStatusSubmit SubmitStatus = "statusSubmit"
+	SubmitStatusError  SubmitStatus = "statusError"
+	SubmitStatusCancel SubmitStatus = "statusCancel"
 )
+
+// String returns the stringified type
+func (w JobWrapped) String() string {
+	return fmt.Sprintf("%d", w)
+}
 
 // GetJobName creates a job name that appends the type
 func GetJobName(jobType JobWrapped, name string) string {
-
 	switch jobType {
 	case JobWrappedJob:
 		return fmt.Sprintf("%s-job", name)
@@ -67,6 +77,10 @@ type FluxJobSpec struct {
 	// +optional
 	Type JobWrapped `json:"type"`
 
+	// Original name of the job
+	// +optional
+	Name string `json:"name"`
+
 	// Object is the underlying pod/job/object specification
 	// This currently is assumed that one job has equivalent pods under it
 	// +optional
@@ -99,8 +113,7 @@ type Resources struct {
 
 // FluxJobStatus defines the observed state of FluxJob
 type FluxJobStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	SubmitStatus SubmitStatus `json:"submitStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

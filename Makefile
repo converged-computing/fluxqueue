@@ -16,6 +16,9 @@ IMG ?= $(REGISTRY)/fluxqueue:latest
 DEVIMG ?= $(REGISTRY)/fluxqueue:test
 POSTGRES_IMAGE ?= $(REGISTRY)/fluxqueue-postgres:latest
 
+# This is a custom scheduler plugin, not fluxion
+SCHEDULER_IMAGE ?= $(REGISTRY)/fluxqueue-scheduler:latest
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.30.0
 
@@ -31,6 +34,11 @@ endif
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
+
+# Custom scheduler build
+GO_VERSION := $(shell awk '/^go /{print $$2}' go.mod|head -n1)
+GO_BASE_IMAGE?=golang:$(GO_VERSION)
+DISTROLESS_BASE_IMAGE?=gcr.io/distroless/static:nonroot
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -109,11 +117,16 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
-.PHONY build-postgres: 
+.PHONY: build-postgres
+build-postgres:
 	docker build -f build/postgres/Dockerfile -t ${POSTGRES_IMAGE} .
 
+.PHONY: build-scheduler 
+build-scheduler:
+	docker build -t ${SCHEDULER_IMAGE} ./build/scheduler
+
 .PHONY: build-all
-build-all: docker-build build-postgres
+build-all: docker-build build-postgres build-scheduler
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -145,6 +158,8 @@ protoc: $(LOCALBIN)
 .PHONY: proto
 proto: protoc
 	PATH=$(LOCALBIN):${PATH} protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative pkg/service-grpc/service.proto
+
+
 
 ##@ Deployment
 

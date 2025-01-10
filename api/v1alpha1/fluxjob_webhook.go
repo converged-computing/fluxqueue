@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -13,10 +14,8 @@ import (
 )
 
 var (
-	logger             = ctrl.Log.WithName("webhook")
-	schedulingGateName = "fluxqueue"
-	schedulerName      = "fluxion"
-	mgr                manager.Manager
+	logger = ctrl.Log.WithName("webhook")
+	mgr    manager.Manager
 )
 
 // IMPORTANT: if you use the controller-runtime builder, it will derive this name automatically from the gvk (kind, version, etc. so find the actual created path in the logs)
@@ -68,7 +67,7 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 			logger.Error(err, "marshalling pod")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-		logger.Info("Admission pod success.")
+		logger.Info("Admission or new or seen pod success.")
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
 	}
 
@@ -87,33 +86,43 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
 }
 
-// InjectPod adds the sidecar container to a pod
+// EnqueuePod submits a flux job for the pod
 func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
 	logger.Info("Enqueue pod", "Name", pod.Name, "Namespace", pod.Namespace)
+
+	// Check if we have a label from another abstraction. E.g.,, a job that includes
+	// pods should not schedule the pods twice
+	if pod.ObjectMeta.Labels == nil {
+		pod.ObjectMeta.Labels = map[string]string{}
+	}
+
+	// We've already seen this pod elsewhere, exit without re-submit
+	_, ok := pod.ObjectMeta.Labels[defaults.SeenLabel]
+	if ok {
+		return nil
+	}
+	// Mark the pod now as seen
+	pod.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
 
 	// Add scheduling gate to the pod
 	if pod.Spec.SchedulingGates == nil {
 		pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{}
 	}
-	fluxqGate := corev1.PodSchedulingGate{Name: schedulingGateName}
+
+	fluxqGate := corev1.PodSchedulingGate{Name: defaults.SchedulingGateName}
 	pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, fluxqGate)
 
 	// Ensure the pod gets scheduled with fluxion scheduler
-	pod.Spec.SchedulerName = schedulerName
-	logger.Info("received pod", "Name", pod.Name)
-
-	podBytes, err := json.Marshal(pod)
-	if err != nil {
-		return err
-	}
+	pod.Spec.SchedulerName = defaults.SchedulerName
+	logger.Info("received pod and added gate", "Name", pod.Name)
 
 	return SubmitFluxJob(
 		ctx,
 		JobWrappedPod,
-		podBytes,
 		pod.Name,
 		pod.Namespace,
 		1,
+		pod.Spec.Containers,
 	)
 }
 
@@ -126,19 +135,21 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 	suspended := true
 	job.Spec.Suspend = &suspended
 
-	// Convert to bytes to store with the queue
-	jobBytes, err := json.Marshal(job)
-	if err != nil {
-		return err
+	// Add labels to the pod so they don't trigger another submit/schedule
+	// Check if we have a label from another abstraction. E.g.,, a job that includes
+	// pods should not schedule the pods twice
+	if job.Spec.Template.ObjectMeta.Labels == nil {
+		job.Spec.Template.ObjectMeta.Labels = map[string]string{}
 	}
+	job.Spec.Template.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
 
 	logger.Info("received job", "Name", job.Name)
 	return SubmitFluxJob(
 		ctx,
 		JobWrappedPod,
-		jobBytes,
 		job.Name,
 		job.Namespace,
 		*job.Spec.Parallelism,
+		job.Spec.Template.Spec.Containers,
 	)
 }

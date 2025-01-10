@@ -6,6 +6,11 @@
 *.dylib
 bin/*
 Dockerfile.cross
+vendor
+
+# Custom scheduler plugin, vendor
+build/scheduler/bin
+build/scheduler/vendor
 
 # Test binary, built with `go test -c`
 *.test

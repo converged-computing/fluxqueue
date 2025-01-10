@@ -1,5 +1,10 @@
 package defaults
 
 var (
-	KubernetesJsonGraphFormat = "/home/data/jgf/kubecluster.json"
+	KubernetesJsonGraphFormat = "/kubecluster.json"
+	SchedulingGateName        = "fluxqueue"
+	SchedulerName             = "FluxionScheduler"
+
+	SeenLabel  = "fluxqueue.seen"
+	NodesLabel = "fluxqueue/fluxion-nodes"
 )

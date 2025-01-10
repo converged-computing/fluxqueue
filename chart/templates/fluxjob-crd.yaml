@@ -72,6 +72,9 @@ spec:
               jobspec:
                 description: JobSpec is the Flux jobspec
                 type: string
+              name:
+                description: Original name of the job
+                type: string
               nodes:
                 description: Nodes needed for the job
                 format: int32
@@ -102,6 +105,9 @@ spec:
             type: object
           status:
             description: FluxJobStatus defines the observed state of FluxJob
+            properties:
+              submitStatus:
+                type: string
             type: object
         type: object
     served: true
