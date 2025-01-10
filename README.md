@@ -212,15 +212,11 @@ SELECT group_name, group_size from pods_provisional;
 
 ### TODO
 
-- [ ] would it be a better design to create client for worker package with init? (right now attached to job struct)
 - [ ] scheduleAt can be used to AskFlux in the future
-- [ ] the cluster (and state) needs to be given to fluxion (done from operator)
-  - Nodes that are currently assigned need to be taken into account
-- [ ] starting the operator should allow arguments for queue strategy and parameters
-  - Should we limit the number of jobs processed per cycle?
+- [ ] Nodes that are currently assigned need to be taken into account
+   - Right now they aren't included in resources, but instead should be "given" to Fluxion.
+   - Can we use the bypass that I used for the container scheduler?
 - [ ] deletion of job or pod needs to trigger deletion / cancel
-- [ ] Figure out how to add queue
-- [ ] Figure out how to add fluxion
 - [ ] kubectl plugin to get fluxion state?
 
 ## License
