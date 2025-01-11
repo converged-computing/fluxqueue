@@ -1,17 +1,9 @@
 package fluxqueue
 
 import (
-	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/workers"
-
 	corev1 "k8s.io/api/core/v1"
 	klog "k8s.io/klog/v2"
 )
-
-// Cleanup deletes a pod. It is assumed that it cannot be scheduled
-// This means we do not have a flux id to cancel (-1)
-func (q Queue) Cleanup(pod *corev1.Pod, podspec, groupName string) error {
-	return workers.Cleanup(q.Context, podspec, int64(-1), true, groupName)
-}
 
 // UpdatePodEvent is called on an update, and the old and new object are presented
 func (q *Queue) UpdatePodEvent(oldObj, newObj interface{}) {

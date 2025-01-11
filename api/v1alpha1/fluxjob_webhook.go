@@ -67,7 +67,6 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 			logger.Error(err, "marshalling pod")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-		logger.Info("Admission or new or seen pod success.")
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
 	}
 
@@ -82,7 +81,6 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 		logger.Error(err, "marshalling job")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
-	logger.Info("Admission job success.")
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledJob)
 }
 
@@ -146,7 +144,7 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 	logger.Info("received job", "Name", job.Name)
 	return SubmitFluxJob(
 		ctx,
-		JobWrappedPod,
+		JobWrappedJob,
 		job.Name,
 		job.Namespace,
 		*job.Spec.Parallelism,

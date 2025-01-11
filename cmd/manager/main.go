@@ -217,6 +217,13 @@ func main() {
 		})
 	}
 
+	// Create the event informer for pods. When a pod is finished
+	// we need to call cleanup to fluxion
+	err = reconciler.SetupEvents(ctx)
+	if err != nil {
+		setupLog.Error(err, "Failed to setup events")
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -237,6 +244,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// TODO do we actually need this?
 	waitForJob := func(subscribeChan <-chan *river.Event) {
 		for {
 			select {

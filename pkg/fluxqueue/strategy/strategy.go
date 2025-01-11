@@ -22,6 +22,9 @@ type QueueStrategy interface {
 	Schedule(context.Context, *pgxpool.Pool, int32) ([]river.InsertManyParams, error)
 	PostSubmit(context.Context, *pgxpool.Pool, *river.Client[pgx.Tx]) error
 
+	// Issue cancel to fluxion or other cleanup logic for a jobid (string)
+	Cleanup(context.Context, *pgxpool.Pool, *river.Client[pgx.Tx], []int64) error
+
 	// Return metadata about the strategy for the Queue to know
 	GetReservationDepth() int32
 }

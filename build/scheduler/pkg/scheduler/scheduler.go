@@ -71,12 +71,17 @@ func (fs *FluxionScheduler) PreFilter(ctx context.Context, state *framework.Cycl
 	}
 
 	// Create a map to store the JSON data
-	nodes := strings.Split(nodesLabel, ",")
+	nodes := strings.Split(nodesLabel, "__")
 
-	// Does this pod have an index?
+	// Does this pod have an index? (e.g., stateful set)
 	podIndex, ok := pod.ObjectMeta.Labels["apps.kubernetes.io/pod-index"]
 	if !ok {
-		podIndex = "0"
+
+		// Next try for batch completion index (job pod)
+		podIndex, ok = pod.ObjectMeta.Labels["batch.kubernetes.io/job-completion-index"]
+		if !ok {
+			podIndex = "0"
+		}
 	}
 	index, err := strconv.Atoi(podIndex)
 	if err != nil {

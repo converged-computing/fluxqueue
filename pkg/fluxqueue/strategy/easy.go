@@ -63,6 +63,52 @@ func (EasyBackfill) AddWorkers(workers *river.Workers, cfg rest.Config) error {
 	return nil
 }
 
+// Cleanup submit a job to call fluxion
+func (s EasyBackfill) Cleanup(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	riverClient *river.Client[pgx.Tx],
+	fluxids []int64) error {
+
+	// Shared insertOpts.
+	// Tags can eventually be specific to job attributes, queues, etc.
+	// This also sets the queue to the cleanup queue
+	insertOpts := river.InsertOpts{
+		MaxAttempts: defaults.MaxAttempts,
+		Tags:        []string{s.Name()},
+		Queue:       "cleanup_queue",
+	}
+
+	// A cleanup worker issues a cancel request to fluxion
+	cancelJobs := []work.CleanupArgs{}
+	for _, fluxid := range fluxids {
+		cancelJobs = append(cancelJobs, work.CleanupArgs{FluxID: fluxid})
+	}
+
+	// Prepare batch job for cleanup workers
+	batch := []river.InsertManyParams{}
+	for _, cleanupArgs := range cancelJobs {
+		args := river.InsertManyParams{Args: cleanupArgs, InsertOpts: &insertOpts}
+		batch = append(batch, args)
+	}
+
+	// Insert the cleanup jobs
+	if len(batch) > 0 {
+		_, err := riverClient.InsertMany(ctx, batch)
+		if err != nil {
+			return err
+		}
+		// TODO do we need to delete from database table?
+		// Now cleanup!
+		//dRows, err := pool.Query(ctx, queries.DeleteReservationsQuery)
+		//if err != nil {
+		//	return err
+		//}
+		//defer dRows.Close()
+	}
+	return nil
+}
+
 // Schedule moves pending jobs into being scheduled, which means doing
 // some kind of sort, asking Fluxion, and then alerting the operator when a job
 // is scheduled. When this happens, it us unsuspended / ungated to move to the
@@ -98,6 +144,7 @@ func (s EasyBackfill) Schedule(
 		Queue:       river.QueueDefault,
 	}
 
+	// The easy strategy reserves up to a reservation depth
 	// https://riverqueue.com/docs/batch-job-insertion
 	// Note: this is how to eventually add Priority (1-4, 4 is lowest)
 	// And we can customize other InsertOpts. Of interest is Pending:
@@ -106,7 +153,9 @@ func (s EasyBackfill) Schedule(
 	batch := []river.InsertManyParams{}
 	for i, jobArgs := range jobs {
 		args := river.InsertManyParams{Args: jobArgs, InsertOpts: &insertOpts}
-		if int32(i) < reservationDepth {
+
+		// Reservation depth of -1 is disabling reservations
+		if reservationDepth != -1 && int32(i) < reservationDepth {
 			jobArgs.Reservation = 1
 		}
 		batch = append(batch, args)
@@ -163,59 +212,5 @@ func (s EasyBackfill) PostSubmit(
 	pool *pgxpool.Pool,
 	riverClient *river.Client[pgx.Tx],
 ) error {
-
-	// Shared insertOpts.
-	// Tags can eventually be specific to job attributes, queues, etc.
-	// This also sets the queue to the cleanup queue
-	insertOpts := river.InsertOpts{
-		MaxAttempts: defaults.MaxAttempts,
-		Tags:        []string{s.Name()},
-		Queue:       "cleanup_queue",
-	}
-
-	// Get list of flux ids to cancel
-	// Now we need to collect all the pods that match that.
-	rows, err := pool.Query(ctx, queries.GetReservationsQuery)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	// Collect rows into map, and then slice of cleanup args
-	// A cleanup worker issues a cancel request to fluxion
-	reservations := []work.CleanupArgs{}
-
-	// Collect rows into single result
-	models, err := pgx.CollectRows(rows, pgx.RowToStructByName[ReservationModel])
-	if err != nil {
-		return err
-	}
-	for _, model := range models {
-		cleanupArgs := work.CleanupArgs{GroupName: model.GroupName, FluxID: model.FluxID}
-		reservations = append(reservations, cleanupArgs)
-	}
-
-	// Prepare batch job for cleanup workers
-	batch := []river.InsertManyParams{}
-	for _, cleanupArgs := range reservations {
-		args := river.InsertManyParams{Args: cleanupArgs, InsertOpts: &insertOpts}
-		batch = append(batch, args)
-	}
-
-	// Insert the cleanup jobs
-	if len(batch) > 0 {
-		count, err := riverClient.InsertMany(ctx, batch)
-		if err != nil {
-			return err
-		}
-		klog.Info(count)
-
-		// Now cleanup!
-		dRows, err := pool.Query(ctx, queries.DeleteReservationsQuery)
-		if err != nil {
-			return err
-		}
-		defer dRows.Close()
-	}
 	return nil
 }

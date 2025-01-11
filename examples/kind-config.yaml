@@ -21,6 +21,6 @@ nodes:
     hostPort: 4243
     protocol: TCP
 - role: worker
-#- role: worker
-#- role: worker
+- role: worker
+- role: worker
 #- role: worker

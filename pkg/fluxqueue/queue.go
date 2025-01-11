@@ -97,8 +97,8 @@ func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 			// Default queue handles job allocation
 			river.QueueDefault: {MaxWorkers: queueMaxWorkers},
 
-			// Cleanup queue is only for cancel
-			"cancel_queue": {MaxWorkers: queueMaxWorkers},
+			// Cleanup queue is typically for cancel
+			"cleanup_queue": {MaxWorkers: queueMaxWorkers},
 		},
 		Workers: workers,
 	})
@@ -112,10 +112,10 @@ func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 		return nil, err
 	}
 
-	// Validates reservation depth
-	// TODO(vsoch) allow -1 to disable
+	// Validates reservation depth, if a strategy supports it
+	// A value of -1 means disabled
 	depth := strategy.GetReservationDepth()
-	if depth < 0 {
+	if depth < 0 && depth != -1 {
 		return nil, fmt.Errorf("reservation depth of a strategy must be >= -1")
 	}
 
@@ -157,45 +157,6 @@ func (q *Queue) setupEvents() {
 		//		river.EventKindJobSnoozed, (scheduled later, not used yet)
 	)
 	q.EventChannel = &QueueEvent{Function: trigger, Channel: c}
-}
-
-// Common queue / database functions across strategies!
-// GetFluxID returns the flux ID, and -1 if not found (deleted)
-/*func (q *Queue) GetFluxID(namespace, groupName string) (int64, error) {
-	var fluxID int32 = -1
-	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
-	if err != nil {
-		klog.Errorf("Issue creating new pool %s", err)
-		return int64(fluxID), err
-	}
-	defer pool.Close()
-	result := pool.QueryRow(context.Background(), queries.GetFluxID, groupName, namespace)
-	err = result.Scan(&fluxID)
-
-	// This can simply mean it was already deleted from pending
-	if err != nil {
-		klog.Infof("Error retrieving FluxID for %s/%s: %s", groupName, namespace, err)
-		return int64(-1), err
-	}
-	return int64(fluxID), err
-}*/
-
-// GetInformer returns the pod informer to run as a go routine
-// TODO this should be done through the operator, and then triggered here
-func (q *Queue) GetInformer() error { //cache.SharedIndexInformer {
-	return nil
-	//	return cache.SharedIndexInformer{}
-
-	// Performance improvement when retrieving list of objects by namespace or we'll log 'index not exist' warning.
-	//	podsInformer := q.Handle.SharedInformerFactory().Core().V1().Pods().Informer()
-	//	podsInformer.AddIndexers(cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-
-	// Event handlers to call on update/delete for cleanup
-	//	podsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-	//		UpdateFunc: q.UpdatePodEvent,
-	//		DeleteFunc: q.DeletePodEvent,
-	//	})
-	//	return podsInformer
 }
 
 // Enqueue a new job to the pending queue, which is just a database table
@@ -250,6 +211,11 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 	return types.JobEnqueueSuccess, nil
 }
 
+// Cleanup deletes (cancels) job with fluxion
+func (q *Queue) Cleanup(fluxids []int64) error {
+	return q.Strategy.Cleanup(q.Context, q.Pool, q.riverClient, fluxids)
+}
+
 // Schedule assesses jobs in pending to be sent to Fluxion.
 // The strategy determines which get chosen (e.g., scheduled at time or priority)
 // TODO: we need another mechanism to kick off the queue
@@ -263,6 +229,8 @@ func (q *Queue) Schedule() error {
 	q.lock.Lock()         // Acquire the lock
 	defer q.lock.Unlock() // Release the lock when the function exits
 
+	// TODO need to remove job from pending table here, once is scheduled
+	// job doesn't need to be there.
 	// This generates a batch of jobs to send to ask Fluxion for nodes
 	batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
 	if err != nil {
@@ -278,7 +246,8 @@ func (q *Queue) Schedule() error {
 	}
 
 	// Post submit functions
-	return nil // q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
+	// E.g., for easy we need to clear reservations
+	return q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
 }
 
 // GetCreationTimestamp returns the creation time of a podGroup or a pod in seconds (time.MicroTime)

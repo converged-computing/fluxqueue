@@ -49,7 +49,6 @@ func NewJobWorker(cfg rest.Config) (*JobWorker, error) {
 // We add extra fields to anticipate getting node assignments
 type JobArgs struct {
 	Jobspec     string `json:"jobspec"`
-	Object      []byte `json:"object"`
 	Name        string `json:"name"`
 	Namespace   string `json:"namespace"`
 	FluxJobName string `json:"flux_job_name"`
@@ -88,6 +87,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		klog.Error(err, "[WORK] Fluxion error connecting to server")
 		return err
 	}
+	defer fluxion.Close()
 
 	// An error here is an error with making the request, nothing about
 	// the match/allocation itself.
@@ -142,13 +142,14 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 
 	// Parse binary data back into respective object and update in API
 	if job.Args.Type == api.JobWrappedJob.String() {
-		err = unsuspendJob(job.Args.Object, nodes)
+		err = w.unsuspendJob(job.Args.Namespace, job.Args.Name, nodes)
 		if err != nil {
 			wlog.Info("Error unsuspending job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 			return err
 		}
+		wlog.Info("Success unsuspending job", "Namespace", job.Args.Namespace, "Name", job.Args.Name)
 	} else if job.Args.Type == api.JobWrappedPod.String() {
-		err = w.ungatePod(job.Args.Namespace, job.Args.Name, nodes)
+		err = w.ungatePod(job.Args.Namespace, job.Args.Name, nodes, fluxID)
 		if err != nil {
 			wlog.Info("Error ungating pod", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 			return err
@@ -207,12 +208,32 @@ func parseNodes(allocation string) ([]string, error) {
 }
 
 // Unsuspend the job, adding an annotation for nodes along with the fluxion scheduler
-func unsuspendJob(object []byte, nodes []string) error {
-	return nil
+func (w JobWorker) unsuspendJob(namespace, name string, nodes []string) error {
+	ctx := context.Background()
+
+	// Get the pod to update
+	client, err := kubernetes.NewForConfig(&w.RESTConfig)
+	if err != nil {
+		return err
+	}
+
+	// Patch the job pod template
+	nodesStr := strings.Join(nodes, "__")
+	payload := `{"spec": {"template": {"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `"}}}, "suspend": false}}`
+	fmt.Println(payload)
+	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Patch the pod to remove the scheduling gate at the correct index
+	//	patch := []byte(`[{"op": "replace", "path": "/spec/suspend", "value": false}]`)
+	//	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.JSONPatchType, patch, metav1.PatchOptions{})
+	return err
 }
 
 // Ungate the pod, adding an annotation for nodes along with the fluxion scheduler
-func (w JobWorker) ungatePod(namespace, name string, nodes []string) error {
+func (w JobWorker) ungatePod(namespace, name string, nodes []string, fluxId int64) error {
 	ctx := context.Background()
 
 	// Get the pod to update
@@ -234,9 +255,12 @@ func (w JobWorker) ungatePod(namespace, name string, nodes []string) error {
 		}
 	}
 
+	// Convert jobid to string
+	jobid := fmt.Sprintf("%d", fluxId)
+
 	// Patch the pod to add the nodes
-	nodesStr := strings.Join(nodes, ",")
-	payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `"}}}`
+	nodesStr := strings.Join(nodes, "__")
+	payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}`
 	fmt.Println(payload)
 	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
 	if err != nil {

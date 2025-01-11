@@ -212,16 +212,35 @@ SELECT group_name, group_size from pods_provisional;
 
 ### TODO
 
+- [ ] node separator of `__` is ok?
+- [ ] another mechanism to move schedule queue aside from new submission
 - [ ] How does fluxion work with a duration - does it remove scheduled stuff at that timestamp?
   - Need to figure out way to coordinate fluxion time ending with cancel of pods, and cancel of pods with cancel to fluxion.
   - The latter is OK if there is some delay, because fluxion wouldn't reassign to nodes it thinks are being used.
   - There is mostly just the wasted resources time in that. 
   - But we can't cancel to fluxion if pods still running on nodes - something else could be scheduled.
 - [ ] I already forgot how reservations work!
+ - We have a queue that sends jobs to the scheduler
+ - The scheduler does everything that it can, and then it starts reserving things
+ - Reservations block off resources and give an estimated start time.
+ - Reservations are cleared after the loop.
+ - If reservation set to true, it will keep looking for earliest time in future.
+ - Reservations are saving state of those jobs for the scheduler JUST during the loop
+ - The reservations are cleared out after the loop.
+ - Make easy / basic backfill reservations on by default
+ - [ ] The deletion of objects should always trigger fluxion cancel
+ - [ ] objects that don't have end time need to submit a delete job
+ - [ ] cleanup job will issue the cancel to fluxion, respond to event
 - [ ] scheduleAt can be used to AskFlux in the future
 - [ ] Nodes that are currently assigned need to be taken into account
    - Right now they aren't included in resources, but instead should be "given" to Fluxion.
    - Can we use the bypass that I used for the container scheduler?
+   - Analogous to restarting cluster when jobs already running
+   - Resource representation of what is running gets sent back to flux-sched.
+   - [UpdateAllocate](https://github.com/flux-framework/fluxion-go/blob/bbe5b38ff747eba76e4eda8205a7bfba5f6aee82/pkg/fluxcli/reapi_cli.go#L206) 
+   - make up job ids
+   - take system / operator pods that are running, convert into JGF, and then figure out which resources each are running on. 
+   - at end of loop need to go through jobs, for those that aren't scheduled cancel.
 - [ ] deletion of job or pod needs to trigger deletion / cancel
 - [ ] kubectl plugin to get fluxion state?
 
