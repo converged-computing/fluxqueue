@@ -39,6 +39,7 @@ type jobReceiver struct {
 // Handle is the main function to receive the object (por or job to start)
 // Pods: we use scheduling gates to prevent from scheduling
 // Jobs: we suspend
+// TODO we need to catch remainder of types
 func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admission.Response {
 
 	// First try for job
@@ -86,7 +87,12 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 
 // EnqueuePod submits a flux job for the pod
 func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
-	logger.Info("Enqueue pod", "Name", pod.Name, "Namespace", pod.Namespace)
+
+	// Pods associated with a parent object often don't have a name
+	if pod.Name == "" {
+		return nil
+	}
+	logger.Info("Contender pod", "Name", pod.Name, "Namespace", pod.Namespace)
 
 	// Check if we have a label from another abstraction. E.g.,, a job that includes
 	// pods should not schedule the pods twice
@@ -126,12 +132,7 @@ func (a *jobReceiver) EnqueuePod(ctx context.Context, pod *corev1.Pod) error {
 
 // EnqueueJob suspends the job and creates a FluxJob
 func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
-
-	logger.Info("Enqueue job", "Name", job.Name, "Namespace", job.Namespace)
-
-	// Suspend the job
-	suspended := true
-	job.Spec.Suspend = &suspended
+	logger.Info("Contender job", "Name", job.Name, "Namespace", job.Namespace)
 
 	// Add labels to the pod so they don't trigger another submit/schedule
 	// Check if we have a label from another abstraction. E.g.,, a job that includes
@@ -139,9 +140,21 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 	if job.Spec.Template.ObjectMeta.Labels == nil {
 		job.Spec.Template.ObjectMeta.Labels = map[string]string{}
 	}
-	job.Spec.Template.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
 
-	logger.Info("received job", "Name", job.Name)
+	// Cut out early if we are getting hit again
+	_, ok := job.ObjectMeta.Labels[defaults.SeenLabel]
+	if ok {
+		return nil
+	}
+	job.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	job.Spec.Template.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	job.Spec.Template.Spec.SchedulerName = defaults.SchedulerName
+
+	// Suspend the job
+	suspended := true
+	job.Spec.Suspend = &suspended
+
+	logger.Info("received job and suspended", "Name", job.Name)
 	return SubmitFluxJob(
 		ctx,
 		JobWrappedJob,

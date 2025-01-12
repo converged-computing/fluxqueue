@@ -5,7 +5,8 @@ var (
 	SchedulingGateName        = "fluxqueue"
 	SchedulerName             = "FluxionScheduler"
 
-	SeenLabel      = "fluxqueue.seen"
-	NodesLabel     = "fluxqueue/fluxion-nodes"
-	FluxJobIdLabel = "fluxqueue/jobid"
+	FluxJobIdLabel     = "fluxqueue/jobid"
+	NodesLabel         = "fluxqueue/fluxion-nodes"
+	SeenLabel          = "fluxqueue.seen"
+	UnschedulableLabel = "fluxqueue/unschedulable"
 )

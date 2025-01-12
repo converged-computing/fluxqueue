@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"fmt"
-
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
@@ -23,19 +21,15 @@ func (r *FluxJobReconciler) submitJob(spec *api.FluxJob) (ctrl.Result, error) {
 	}
 	rlog.Info("Enqueue for job was successful", "Namespace", spec.Namespace, "Name", spec.Name)
 
-	// If we cannot schedule "unsatisfiable" we delete
-	deleteJob := false
-
 	// If the group is already in pending we reject it. We do not
 	// currently support expanding groups that are undergoing processing, unless
-	// it is an explicit update to an object (TBA).
+	// it is an explicit update to an object (TBA). Note that after the submit
+	// label is applied, hitting this state should never happen.
 	if enqueueStatus == types.JobAlreadyInPending {
 		rlog.Error(err, "Job already in pending queue", "Namespace", spec.Namespace, "Name", spec.Name)
-		deleteJob = true
 
 	} else if enqueueStatus == types.JobInvalid {
 		rlog.Error(err, "Job is invalid or erroneous", "Namespace", spec.Namespace, "Name", spec.Name)
-		deleteJob = true
 
 	} else if enqueueStatus == types.JobEnqueueSuccess {
 		rlog.Info("Job was added to pending", "Namespace", spec.Namespace, "Name", spec.Name)
@@ -44,13 +38,11 @@ func (r *FluxJobReconciler) submitJob(spec *api.FluxJob) (ctrl.Result, error) {
 	} else if enqueueStatus == types.Unknown {
 		rlog.Info("Job had unknown issue adding to pending", "Namespace", spec.Namespace, "Name", spec.Name)
 	}
-	// TODO delete / cleanup from pending
-	fmt.Println(deleteJob)
 
 	// Keep queue moving here (running Schedule()
 	err = r.Queue.Schedule()
 	if err != nil {
-		rlog.Error(err, "Issue with fluxnetes Schedule")
+		rlog.Error(err, "Issue with fluxqueue Schedule")
 	}
 	return result, nil
 }

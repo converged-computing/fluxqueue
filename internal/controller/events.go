@@ -21,17 +21,8 @@ func (r *FluxJobReconciler) SetupEvents(ctx context.Context) error {
 	// Create an Informer for Pods
 	podInformer := informers.NewSharedInformerFactory(client, 0).Core().V1().Pods().Informer()
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			// Handle Pod creation events
-			pod := obj.(*corev1.Pod)
-			rlog.Info("pod is added", "Name", pod.Name, "Namespace", pod.Namespace)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			// Handle Pod update events
-			// oldPod := oldObj.(*corev1.Pod)
-			//pod := newObj.(*corev1.Pod)
-			//rlog.Info("pod is updated", "Name", pod.Name, "Namespace", pod.Namespace)
-		},
+		// AddFunc is not used here AddFunc: func(obj interface{}) {
+		// UpdateFunc is not used here UpdateFunc: func(oldObj, newObj interface{})
 		DeleteFunc: func(obj interface{}) {
 			// Handle Pod deletion events
 			pod := obj.(*corev1.Pod)

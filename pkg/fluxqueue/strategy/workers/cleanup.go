@@ -166,28 +166,6 @@ func Cleanup(ctx context.Context, fluxid int64) error {
 		}
 		return err
 	}
-
-	// Next, delete from the pending table to new pods with same group
-	// TODO should we allow this to continue?
-	//	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
-	//	if err != nil {
-	//		klog.Errorf("Issue creating new pool during cancel: %s", err)
-	//		return err
-	//	}
-	//	defer pool.Close()
-
-	// Delete from pending and pods provisional, meaning we are allowed to accept new pods for the group
-	/*_, err = pool.Exec(context.Background(), queries.DeleteProvisionalGroupsQuery, groupName, pod.Namespace)
-	if err != nil {
-		klog.Infof("Error deleting Pods %s/%s from provisional queue", pod.Namespace, pod.Name)
-		return err
-	}
-
-	_, err = pool.Exec(context.Background(), queries.DeleteFromPendingQuery, groupName, pod.Namespace)
-	if err != nil {
-		klog.Infof("Error deleting Pod %s/%s from pending queue", pod.Namespace, pod.Name)
-		return err
-	}*/
 	return nil
 }
 

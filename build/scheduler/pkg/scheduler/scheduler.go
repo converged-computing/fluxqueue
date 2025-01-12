@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	NodesLabel = "fluxqueue/fluxion-nodes"
+	NodesLabel         = "fluxqueue/fluxion-nodes"
+	UnschedulableLabel = "fluxqueue/unschedulable"
 )
 
 // This is a simple scheduler plugin that receives pods that already have a node assignment.
@@ -64,10 +65,16 @@ func getNamespacedName(obj metav1.Object) string {
 func (fs *FluxionScheduler) PreFilter(ctx context.Context, state *framework.CycleState, pod *v1.Pod) (*framework.PreFilterResult, *framework.Status) {
 	klog.InfoS("PreFilter received contender pod", "pod", klog.KObj(pod))
 
+	// Case 1: unscheduleable and unresolvable
+	_, isImpossible := pod.ObjectMeta.Labels[UnschedulableLabel]
+	if isImpossible {
+		return nil, framework.NewStatus(framework.UnschedulableAndUnresolvable, "Fluxion cannot find resources")
+	}
+
 	nodesLabel, ok := pod.ObjectMeta.Labels[NodesLabel]
 	if !ok {
 		klog.InfoS("Pod is missing nodes label", "Label", NodesLabel, "pod", klog.KObj(pod))
-		return nil, framework.NewStatus(framework.Unschedulable, "Pod missing nodes label")
+		return nil, framework.NewStatus(framework.UnschedulableAndUnresolvable, "Pod missing nodes label")
 	}
 
 	// Create a map to store the JSON data
@@ -96,17 +103,10 @@ func (fs *FluxionScheduler) PreFilter(ctx context.Context, state *framework.Cycl
 	nodeNames := sets.New(nodes[index])
 	result := framework.PreFilterResult{NodeNames: nodeNames}
 	klog.InfoS("PreFilter node assignment", "pod", klog.KObj(pod), "node", nodes[index])
-	// TODO save cyclestate and check in Filter?
 	return &result, framework.NewStatus(framework.Success, "Fluxion scheduler assigned node")
 }
 
 func (fs *FluxionScheduler) Filter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-
-	// Check the pod assignment against what it should be again
-	//	state, err := cycleState.Read(framework.StateKey(pod.Name))
-	//	if err != nil {
-	//
-	//	}
 	klog.InfoS("Filter received pod assignment", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
 	return framework.NewStatus(framework.Success)
 }

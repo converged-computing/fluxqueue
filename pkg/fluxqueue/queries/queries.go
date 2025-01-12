@@ -11,6 +11,9 @@ const (
 	InsertIntoPending = "insert into pending_queue (jobspec, flux_job_name, namespace, name, type, reservation, duration, size) values ($1, $2, $3, $4, $5, $6, $7, $8);"
 	// TODO add back created_at
 
+	// We remove from pending to allow another group submission of the same name on cleanup
+	DeleteFromPendingQuery = "delete from pending_queue where name=$1 and namespace=$2;"
+
 	// Easy Queries to get jobs
 	// Select jobs based on creation timestamp
 	SelectPendingByCreation = "select jobspec, name, flux_job_name, namespace, type, reservation, duration, size from pending_queue order by created_at desc;"
@@ -57,8 +60,5 @@ const (
 
 	// After allocate success, we update pending with the ID. We retrieve it to issue fluxion to cancel when it finishes
 	UpdatingPendingWithFluxID = "update pending_queue set flux_id = $1 where group_name = $2 and namespace = $3;"
-	GetFluxID                 = "select flux_id from pending_queue where group_name = $1 and namespace = $2;"
-
-	// We remove from pending to allow another group submission of the same name on cleanup
-	DeleteFromPendingQuery = "delete from pending_queue where name=$1 and namespace=$2;"*/
+	GetFluxID                 = "select flux_id from pending_queue where group_name = $1 and namespace = $2;"*/
 )
