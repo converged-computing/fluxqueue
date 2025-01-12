@@ -28,7 +28,6 @@ import (
 	"k8s.io/client-go/rest"
 
 	fluxion "github.com/converged-computing/fluxion/pkg/client"
-	"github.com/riverqueue/river"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -217,6 +216,13 @@ func main() {
 		})
 	}
 
+	// Create the event informer for pods. When a pod is finished
+	// we need to call cleanup to fluxion
+	err = reconciler.SetupEvents(ctx)
+	if err != nil {
+		setupLog.Error(err, "Failed to setup events")
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -236,22 +242,6 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-
-	waitForJob := func(subscribeChan <-chan *river.Event) {
-		for {
-			select {
-			case event := <-subscribeChan:
-				if event == nil {
-					setupLog.Info("Channel is closed")
-					return
-				}
-				setupLog.Info("Job Event Received", "Kind", event.Job.Kind)
-			}
-		}
-	}
-	defer queue.EventChannel.Function()
-	waitForJob(queue.EventChannel.Channel)
-
 	err = queue.Stop(ctx)
 	if err != nil {
 		setupLog.Error(err, "Failed to stop FluxQueue")

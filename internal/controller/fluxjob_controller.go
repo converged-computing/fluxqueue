@@ -71,6 +71,10 @@ func NewFluxJobReconciler(
 // +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 
+// +kubebuilder:rbac:groups=batch,resources=jobs/log,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs/exec,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=jobs.converged-computing.org,resources=fluxjobs/finalizers,verbs=update

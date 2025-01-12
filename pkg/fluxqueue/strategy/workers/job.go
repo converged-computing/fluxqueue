@@ -8,21 +8,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
 	"github.com/converged-computing/fluxqueue/pkg/types"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	patchTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	// ctrlClient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -49,7 +48,6 @@ func NewJobWorker(cfg rest.Config) (*JobWorker, error) {
 // We add extra fields to anticipate getting node assignments
 type JobArgs struct {
 	Jobspec     string `json:"jobspec"`
-	Object      []byte `json:"object"`
 	Name        string `json:"name"`
 	Namespace   string `json:"namespace"`
 	FluxJobName string `json:"flux_job_name"`
@@ -64,69 +62,53 @@ type JobArgs struct {
 	Nodes string `json:"nodes"`
 }
 
-// Work performs the AskFlux action. Cases include:
-// Allocated: the job was successful and does not need to be re-queued. We return nil (completed)
-// NotAllocated: the job cannot be allocated and needs to be requeued
-// Not possible for some reason, likely needs a cancel
-// Are there cases of scheduling out into the future further?
-// See https://riverqueue.com/docs/snoozing-jobs
+// Work performs the AskFlux action. Any error returned that is due to not having resources means
+// the job will remain in the worker queue to AskFluxion again.
 func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
-	wlog.Info("[WORK] Asking Fluxion running for job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Args", job.Args)
+	wlog.Info("Asking Fluxion to schedule job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
 
-	//	Let's ask Flux if we can allocate the job!
+	//	Let's ask Flux if we can allocate nodes for the job!
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
 	// Prepare the request to allocate - convert string to bytes
-	fmt.Println(job.Args.Jobspec)
 	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
-	// Note that this design isn't ideal - we should be calling this just once
 	fluxion, err := client.NewClient("127.0.0.1:4242")
 	if err != nil {
-		klog.Error(err, "[WORK] Fluxion error connecting to server")
+		wlog.Error(err, "Fluxion error connecting to server")
 		return err
 	}
+	defer fluxion.Close()
 
 	// An error here is an error with making the request, nothing about
 	// the match/allocation itself.
 	response, err := fluxion.Match(fluxionCtx, request)
-	fmt.Println(response)
 	if err != nil {
 		wlog.Info("[WORK] Fluxion did not receive any match response", "Error", err)
 		return err
 	}
 
-	// Convert the response into an error code that indicates if we should run again.
-	// If we have an allocation, the job/etc must be un-suspended or released
-	// The database also needs to be updated (not sure how to do that yet)
-	pool, err := pgxpool.New(fluxionCtx, os.Getenv("DATABASE_URL"))
-	if err != nil {
-		return err
-	}
-
-	// Not reserved AND not allocated indicates not possible
-	if !response.Reserved && response.GetAllocation() == "" {
+	// If we asked for a reservation, and it wasn't reserved AND not allocated, this means it's not possible
+	// We currently don't have grow/shrink added so this means it will never be possible.
+	// We will unsuspend the job but add a label that indicates it is not schedulable.
+	// The cancel here will complete the task (and we won't ask again)
+	if job.Args.Reservation == 1 && !response.Reserved && response.GetAllocation() == "" {
+		w.markUnschedulable(job.Args)
 		return river.JobCancel(fmt.Errorf("fluxion could not allocate nodes for %s/%s, likely Unsatisfiable", job.Args.Namespace, job.Args.Name))
 	}
 
 	// Flux job identifier (known to fluxion)
 	fluxID := response.GetJobid()
 
-	// If it's reserved, we need to add the id to our reservation table
-	// TODO need to clean up this table...
+	// If it's reserved, add the id to our reservation table
+	// TODO need to clean up this table... but these tasks run async...
 	if response.Reserved {
-		rRows, err := pool.Query(fluxionCtx, queries.AddReservationQuery, job.Args.Name, fluxID)
-		if err != nil {
-			return err
-		}
-		defer rRows.Close()
+		w.reserveJob(fluxionCtx, job.Args, fluxID)
 	}
 
-	// This means we didn't get an allocation - we might have a reservation (to do
-	// something with later) but for now we just print it.
-	// TODO we need an IsAllocated function
+	// This means we didn't get an allocation - we might have a reservation
 	if response.GetAllocation() == "" {
 		// This will have the job be retried in the queue, still based on sorted schedule time and priority
 		return fmt.Errorf("fluxion could not allocate nodes for job %s/%s", job.Args.Namespace, job.Args.Name)
@@ -138,38 +120,81 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		wlog.Info("Error parsing nodes from fluxion response", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 		return err
 	}
-	wlog.Info("Allocation response", "Nodes", nodes)
+	wlog.Info("Fluxion allocation response", "Nodes", nodes)
 
-	// Parse binary data back into respective object and update in API
-	if job.Args.Type == api.JobWrappedJob.String() {
-		err = unsuspendJob(job.Args.Object, nodes)
-		if err != nil {
-			wlog.Info("Error unsuspending job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
-			return err
-		}
-	} else if job.Args.Type == api.JobWrappedPod.String() {
-		err = w.ungatePod(job.Args.Namespace, job.Args.Name, nodes)
-		if err != nil {
-			wlog.Info("Error ungating pod", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
-			return err
-		}
-		wlog.Info("Success ungating pod", "Namespace", job.Args.Namespace, "Name", job.Args.Name)
-	} else {
-		wlog.Info("Error understanding job type", "Type", job.Args.Type, "Name", job.Args.Namespace, "Name", job.Args.Name)
-		return fmt.Errorf("unknown job type %s passed to fluxion schedule for job %s/%s", job.Args.Type, job.Args.Namespace, job.Args.Name)
+	// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
+	err = w.releaseJob(job.Args, fluxID, nodes)
+	if err != nil {
+		return err
 	}
 
-	// TODO Kick off a cleaning job for when everything should be cancelled, but only if
-	// there is a deadline set. We can't set a deadline for services, etc.
-	// This is here instead of responding to deletion / termination since a job might
-	// run longer than the duration it is allowed.
-	//if job.Args.Duration > 0 {
-	// err = SubmitCleanup(ctx, pool, pod.Spec.ActiveDeadlineSeconds, job.Args.Podspec, int64(fluxID), true, []string{})
-	//if err != nil {
-	//	return err
-	//}
-	//}
-	wlog.Info("[WORK] nodes allocated for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
+	wlog.Info("Fluxion finished allocating nodes for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
+	return nil
+}
+
+// Release job will unsuspend a job or ungate pods to allow for scheduling
+func (w JobWorker) releaseJob(args JobArgs, fluxID int64, nodes []string) error {
+	var err error
+
+	if args.Type == api.JobWrappedJob.String() {
+
+		// Kubernetes Job Type
+		err = w.unsuspendJob(args.Namespace, args.Name, nodes, fluxID)
+		if err != nil {
+			wlog.Info("Error unsuspending job", "Namespace", args.Namespace, "Name", args.Name, "Error", err)
+			return err
+		}
+		wlog.Info("Success unsuspending job", "Namespace", args.Namespace, "Name", args.Name)
+
+	} else if args.Type == api.JobWrappedPod.String() {
+
+		// Pod Type
+		err = w.ungatePod(args.Namespace, args.Name, nodes, fluxID)
+		if err != nil {
+			wlog.Info("Error ungating pod", "Namespace", args.Namespace, "Name", args.Name, "Error", err)
+			return err
+		}
+		wlog.Info("Success ungating pod", "Namespace", args.Namespace, "Name", args.Name)
+
+	} else {
+
+		// Unknown type (gets marked as unschedulable)
+		wlog.Info("Error understanding job type", "Type", args.Type, "Name", args.Namespace, "Name", args.Name)
+		return fmt.Errorf("unknown job type %s passed to fluxion schedule for job %s/%s", args.Type, args.Namespace, args.Name)
+	}
+	return err
+}
+
+// Reject job adds labels to the pods to indicate not schedulable
+func (w JobWorker) markUnschedulable(args JobArgs) error {
+	if args.Type == api.JobWrappedJob.String() {
+		err := w.rejectJob(args.Namespace, args.Name)
+		if err != nil {
+			wlog.Info("Error marking job unschedulable", "Namespace", args.Namespace, "Name", args.Name, "Error", err)
+			return err
+		}
+	} else if args.Type == api.JobWrappedPod.String() {
+		err := w.rejectPod(args.Namespace, args.Name)
+		if err != nil {
+			wlog.Info("Error marking pod unschedulable", "Namespace", args.Namespace, "Name", args.Name, "Error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (w JobWorker) reserveJob(ctx context.Context, args JobArgs, fluxID int64) error {
+	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return fmt.Errorf("issue creating new pool: %s", err.Error())
+	}
+	defer pool.Close()
+
+	rRows, err := pool.Query(ctx, queries.AddReservationQuery, args.Name, fluxID)
+	if err != nil {
+		return err
+	}
+	defer rRows.Close()
 	return nil
 }
 
@@ -188,8 +213,6 @@ func parseNodes(allocation string) ([]string, error) {
 		return nodes, err
 	}
 
-	wlog.Info("Parsing fluxion nodes", "Nodes", graph.Graph.Nodes)
-
 	// To start, just parse nodes and not cores (since we can't bind on level of core)
 	for _, node := range graph.Graph.Nodes {
 		if node.Metadata.Type == "node" {
@@ -207,12 +230,7 @@ func parseNodes(allocation string) ([]string, error) {
 }
 
 // Unsuspend the job, adding an annotation for nodes along with the fluxion scheduler
-func unsuspendJob(object []byte, nodes []string) error {
-	return nil
-}
-
-// Ungate the pod, adding an annotation for nodes along with the fluxion scheduler
-func (w JobWorker) ungatePod(namespace, name string, nodes []string) error {
+func (w JobWorker) unsuspendJob(namespace, name string, nodes []string, fluxId int64) error {
 	ctx := context.Background()
 
 	// Get the pod to update
@@ -220,6 +238,71 @@ func (w JobWorker) ungatePod(namespace, name string, nodes []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Convert jobid to string
+	jobid := fmt.Sprintf("%d", fluxId)
+
+	// Add the nodes and flux id as an annotation to the pods that will be generated
+	nodesStr := strings.Join(nodes, "__")
+	payload := `{"spec": {"suspend": false, "template": {"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}}}`
+	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.StrategicMergePatchType, []byte(payload), metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	// And unsuspend the job
+	return patchUnsuspend(ctx, client, name, namespace)
+}
+
+// patchUnsuspend patches a pod to unsuspend it.
+func patchUnsuspend(ctx context.Context, client *kubernetes.Clientset, namespace, name string) error {
+	patch := []byte(`[{"op": "replace", "path": "/spec/suspend", "value": null}]`)
+	_, err := client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.JSONPatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// rejectJob adds a label to indicate unschedulable and unresolvable
+func (w JobWorker) rejectJob(namespace, name string) error {
+	ctx := context.Background()
+
+	// Get the pod to update
+	client, err := kubernetes.NewForConfig(&w.RESTConfig)
+	if err != nil {
+		return err
+	}
+	payload := `{"spec": {"suspend": false, "template": {"metadata": {"labels": {"` + defaults.UnschedulableLabel + `": "yes"}}}}}`
+	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.StrategicMergePatchType, []byte(payload), metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	// And unsuspend the job so it is sent to the scheduler
+	return patchUnsuspend(ctx, client, name, namespace)
+}
+
+// Ungate the pod, adding an annotation for nodes along with the fluxion scheduler
+func (w JobWorker) ungatePod(namespace, name string, nodes []string, fluxId int64) error {
+	ctx := context.Background()
+
+	// Get the pod to update
+	client, err := kubernetes.NewForConfig(&w.RESTConfig)
+	if err != nil {
+		return err
+	}
+	// Convert jobid to string
+	jobid := fmt.Sprintf("%d", fluxId)
+
+	// Patch the pod to add the nodes
+	nodesStr := strings.Join(nodes, "__")
+	payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}`
+	fmt.Println(payload)
+	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	return removeGate(ctx, client, namespace, name)
+}
+
+// removeGate removes the scheduling gate from the pod
+func removeGate(ctx context.Context, client *kubernetes.Clientset, namespace, name string) error {
 	pod, err := client.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -234,17 +317,25 @@ func (w JobWorker) ungatePod(namespace, name string, nodes []string) error {
 		}
 	}
 
-	// Patch the pod to add the nodes
-	nodesStr := strings.Join(nodes, ",")
-	payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `"}}}`
-	fmt.Println(payload)
-	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-
 	// Patch the pod to remove the scheduling gate at the correct index
 	patch := []byte(`[{"op": "remove", "path": "/spec/schedulingGates/` + fmt.Sprintf("%d", gateIndex) + `"}]`)
 	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.JSONPatchType, patch, metav1.PatchOptions{})
 	return err
+}
+
+// Reject a pod, mark as unschedulable and unresolvable
+func (w JobWorker) rejectPod(namespace, name string) error {
+	ctx := context.Background()
+
+	// Get the pod to update
+	client, err := kubernetes.NewForConfig(&w.RESTConfig)
+	if err != nil {
+		return err
+	}
+	payload := `{"metadata": {"labels": {"` + defaults.UnschedulableLabel + `": "yes"}}}`
+	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	return removeGate(ctx, client, namespace, name)
 }

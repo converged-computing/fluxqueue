@@ -5,10 +5,13 @@ import (
 
 	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	pb "github.com/converged-computing/fluxqueue/pkg/service-grpc"
-
-	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"context"
+)
+
+var (
+	slog = ctrl.Log.WithName("worker")
 )
 
 type ExternalService struct {
@@ -17,14 +20,14 @@ type ExternalService struct {
 
 // Init is a helper function for any startup stuff, for which now we have none :)
 func (f *ExternalService) Init() {
-	klog.Infof("[fluxqueue] Created external service.")
+	slog.Info("created external service.")
 }
 
 // GetGroup gets and returns the group info
 // TODO no good way to look up group - we would need to ask Fluxion directly OR put the grpc
 // service alongside the scheduler plugin, which seems like a bad design
 func (s *ExternalService) GetGroup(ctx context.Context, in *pb.GroupRequest) (*pb.GroupResponse, error) {
-	klog.Infof("[fluxqueue] Calling get group endpoint! %v\n", in)
+	slog.Info("calling get group endpoint", "Input", in)
 
 	// Prepare an empty match response (that can still be serialized)
 	emptyResponse := &pb.GroupResponse{}
@@ -37,8 +40,7 @@ func (s *ExternalService) ListGroups(ctx context.Context, in *pb.GroupRequest) (
 	emptyResponse := &pb.GroupResponse{}
 
 	// Prepare an empty match response (that can still be serialized)
-	klog.Infof("[fluxqueue] Calling list groups endpoint! %v\n", in)
-
+	slog.Info("calling list groups endpoint", "Input", in)
 	return emptyResponse, nil
 }
 
@@ -49,11 +51,11 @@ func (s *ExternalService) GetResources(ctx context.Context, in *pb.ResourceReque
 	emptyResponse := &pb.ResourceResponse{}
 
 	// Prepare an empty match response (that can still be serialized)
-	klog.Infof("[fluxqueue] Calling get resources endpoint! %v\n", in)
+	slog.Info("calling get resources endpoint", "Input", in)
 
 	jgf, err := os.ReadFile(defaults.KubernetesJsonGraphFormat)
 	if err != nil {
-		klog.Error("Error reading JGF")
+		slog.Error(err, "reading JGF")
 		return emptyResponse, err
 	}
 	emptyResponse.Graph = string(jgf)

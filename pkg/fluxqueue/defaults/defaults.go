@@ -9,6 +9,6 @@ const (
 	// The database column is an int16
 	MaxAttempts = math.MaxInt16
 
-	// Default duration is 3600 seconds (one hour)
-	DefaultDuration = 3600
+	// Default duration is 0 (unset) so we honor kubernetes objects
+	DefaultDuration = 0
 )
