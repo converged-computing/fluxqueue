@@ -21,7 +21,6 @@ import (
 	patchTypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -78,7 +77,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
 	fluxion, err := client.NewClient("127.0.0.1:4242")
 	if err != nil {
-		klog.Error(err, "Fluxion error connecting to server")
+		wlog.Error(err, "Fluxion error connecting to server")
 		return err
 	}
 	defer fluxion.Close()

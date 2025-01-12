@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -177,7 +176,7 @@ func (s EasyBackfill) ReadyJobs(ctx context.Context, pool *pgxpool.Pool) ([]work
 
 	models, err := pgx.CollectRows(rows, pgx.RowToStructByName[types.JobModel])
 	if err != nil {
-		klog.Infof("GetReadGroups Error: collect rows for groups at size: %s", err)
+		elog.Error(err, "collecting rows for pending jobs")
 		return nil, err
 	}
 

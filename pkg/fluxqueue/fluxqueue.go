@@ -15,7 +15,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivershared/util/slogutil"
 	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
@@ -150,7 +149,7 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
-		klog.Errorf("Issue creating new pool %s", err)
+		qlog.Error(err, "creating new pool")
 		return types.Unknown, err
 	}
 	defer pool.Close()
@@ -159,7 +158,7 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 	// is not allowed to be submit again. The job is either waiting or running.
 	result, err := pool.Exec(context.Background(), queries.IsPendingQuery, spec.Name, spec.Namespace)
 	if err != nil {
-		klog.Infof("Error checking if job %s/%s is in pending queue", spec.Namespace, spec.Name)
+		qlog.Info("Error checking if job is in pending queue", "Namespace", spec.Namespace, "Name", spec.Name)
 		return types.Unknown, err
 	}
 	if strings.Contains(result.String(), "INSERT 1") {
