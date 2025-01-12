@@ -13,7 +13,7 @@ type Resources struct {
 	Labels  []string
 }
 
-// GeneratePodResources resturns resources for a pod, which can
+// GeneratePodResources returns resources for a pod, which can
 // be used to populate the flux JobSpec
 func GeneratePodResources(containers []corev1.Container) *Resources {
 

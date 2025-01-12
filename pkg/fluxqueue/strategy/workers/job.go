@@ -67,7 +67,7 @@ type JobArgs struct {
 func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	wlog.Info("Asking Fluxion to schedule job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
 
-	//	Let's ask Flux if we can allocate nodes for the job!
+	// Let's ask Flux if we can allocate nodes for the job!
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
@@ -183,6 +183,7 @@ func (w JobWorker) markUnschedulable(args JobArgs) error {
 	return nil
 }
 
+// reserveJob adds the flux job id to the reservation table to cleanup later
 func (w JobWorker) reserveJob(ctx context.Context, args JobArgs, fluxID int64) error {
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {

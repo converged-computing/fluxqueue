@@ -222,7 +222,7 @@ SELECT group_name, group_size from pods_provisional;
   - we need to use shrink here. And a shrink down to size 0 I assume is a cancel.
 - [ ] For cancel, we would issue a cancel for every pod associated with a job. How can we avoid that (or is that OK?)
 - [ ] we will eventually need another mechanism to move schedule queue aside from new submission
-- [ ] River is task based, so the entire concept of a loop is not relevant. We are asking flux asyncronously. The schedule loop, in that it kicks of different river jobs, isn't actually a loop - they run in sync, potentially. 
+- [ ] River is task based, so the entire concept of a loop is not relevant. We are asking flux asynchronously. The schedule loop, in that it kicks of different river jobs, isn't actually a loop - they run in sync, potentially. 
    - So the reservation strategy doesn't make sense because there is no "end" point.
    - Currently I'm just going to set the reservationDepth to 0
 - Reservations notes:

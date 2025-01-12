@@ -53,7 +53,7 @@ func SubmitFluxJob(
 	}
 	resources := jspec.GeneratePodResources(containers)
 
-	// Artifically create a command for the name and namespace
+	// Artificially create a command for the name and namespace
 	command := fmt.Sprintf("echo %s %s", namespace, name)
 
 	// Generate a jobspec for that many nodes (starting simple)
