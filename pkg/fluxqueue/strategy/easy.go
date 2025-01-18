@@ -76,7 +76,7 @@ func (s EasyBackfill) Cleanup(
 	// Tags can eventually be specific to job attributes, queues, etc.
 	// This also sets the queue to the cleanup queue
 	insertOpts := river.InsertOpts{
-		MaxAttempts: defaults.MaxAttempts,
+		MaxAttempts: defaults.MaxCancelAttempts,
 		Tags:        []string{s.Name()},
 		Queue:       "cleanup_queue",
 	}

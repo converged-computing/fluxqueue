@@ -224,9 +224,10 @@ func (q *Queue) Schedule() error {
 
 		// Add the reservation clean up job (run at the end)
 		reservationJob := q.clearReservationJob()
-		batch = append(batch, reservationJob)
+		batchComplete := append(batch, reservationJob)
 
-		_, err = q.riverClient.InsertMany(q.Context, batch)
+		// Submit all jobs to batch, including clearing reservations
+		_, err = q.riverClient.InsertMany(q.Context, batchComplete)
 		if err != nil {
 			return err
 		}

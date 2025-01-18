@@ -227,7 +227,8 @@ psql -U postgres
 \dt
 
 # test a query
-SELECT group_name, group_size from pods_provisional;
+SELECT * from pending_queue;
+SELECT * from reservations;
 ```
 
 ### TODO
