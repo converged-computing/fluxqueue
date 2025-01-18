@@ -138,7 +138,7 @@ jobs:
         cluster_name: kind
         kubectl_version: v1.28.2
         version: v0.20.0
-        config: ./examples/kind-config.yaml
+        config: ./.github/test-kind-config.yaml 
                 
     - name: Install Cert Manager
       run: |
@@ -146,6 +146,6 @@ jobs:
         sleep 20
 
     - name: Deploy Fluxqueue
-      run: ./hack/quick-build-kind.sh ${{ env.registry }} ${{ env.namespace }}
+      run: ./hack/quick-deploy-kind.sh ${{ env.registry }} ${{ env.namespace }}
     - name: Test Fluxqueue
       run: /bin/bash ./.github/test.sh ${{ env.registry }} ${{ env.namespace }}
