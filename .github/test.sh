@@ -20,6 +20,18 @@ echo "Found fluxqueue scheduler pod:  ${scheduler_pod}"
 postgres_pod=$(kubectl get pods -n ${namespace} -o json | jq -r .items[2].metadata.name)
 echo "Found fluxqueue postgres pod:   ${postgres_pod}"
 
+
+# Wait for fluxion to pull (largest container)
+while true
+  do
+  pod_status=$(kubectl get pods ${controller_pod} -n ${namespace} --no-headers -o custom-columns=":status.phase")
+  if [[ "${pod_status}" == "Running" ]]; then
+    echo "Controller ${controller_pod} is ready"
+    break
+  fi
+  sleep 20
+done
+
 function echo_run {
   command="$@"
   echo "⭐️ ${command}"
