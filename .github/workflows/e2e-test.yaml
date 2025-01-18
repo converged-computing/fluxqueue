@@ -90,7 +90,7 @@ jobs:
       postgres_container: ghcr.io/flux-framework/fluxqueue-postgres
 
     runs-on: ubuntu-latest
-    name: build containers
+    name: test fluxqueue
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v4
@@ -129,7 +129,7 @@ jobs:
         docker load --input /tmp/fluxqueue_scheduler.tar.gz
         rm /tmp/fluxqueue_scheduler.tar.gz
         docker load --input /tmp/fluxqueue_postgres.tar.gz
-        rm /tmp/fluxqueue_latest.tar.gz
+        rm /tmp/fluxqueue_postgres.tar.gz
         docker image ls -a | grep fluxqueue
 
     - name: Create Kind Cluster
