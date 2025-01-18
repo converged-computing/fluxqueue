@@ -29,6 +29,7 @@ type SubmitStatus string
 const (
 	JobWrappedPod JobWrapped = iota
 	JobWrappedJob
+	JobWrappedDeployment
 
 	SubmitStatusNew    SubmitStatus = "statusNew"
 	SubmitStatusSubmit SubmitStatus = "statusSubmit"

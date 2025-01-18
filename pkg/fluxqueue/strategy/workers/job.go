@@ -127,7 +127,6 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	if err != nil {
 		return err
 	}
-
 	wlog.Info("Fluxion finished allocating nodes for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
 	return nil
 }

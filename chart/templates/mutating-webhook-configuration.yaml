@@ -21,6 +21,7 @@ webhooks:
     - ""
     - core
     - batch
+    - apps
     apiVersions:
     - v1
     operations:
@@ -29,4 +30,5 @@ webhooks:
     resources:
     - pods
     - jobs
+    - deployments
   sideEffects: None

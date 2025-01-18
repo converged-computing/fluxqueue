@@ -1,0 +1,43 @@
+name: fluxqueue test
+
+on:
+  pull_request: {}
+  workflow_dispatch:
+
+jobs:
+  test-fluxqueue:
+    env:
+      registry: ghcr.io/converged-computing
+      namespace: fluxqueue-system
+
+    runs-on: ubuntu-latest
+    name: build containers
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.22
+
+    - name: Make Space For Build
+      run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          
+    - name: Create Kind Cluster
+      uses: helm/kind-action@v1.5.0
+      with:
+        cluster_name: kind
+        kubectl_version: v1.28.2
+        version: v0.20.0
+        config: ./examples/kind-config.yaml
+                
+    - name: Install Cert Manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+        sleep 20
+
+    - name: Deploy Fluxqueue
+      run: ./hack/quick-build-kind.sh ${{ env.registry }} ${{ env.namespace }}
+    - name: Test Fluxqueue
+      run: /bin/bash ./.github/test.sh ${{ env.registry }} ${{ env.namespace }}

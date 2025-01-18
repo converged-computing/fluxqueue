@@ -1,6 +1,7 @@
 #!/bin/bash
 
 REGISTRY="${1:-ghcr.io/converged-computing}"
+NAMESPACE=${2:-fluxqueue-system}
 HERE=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 ROOT=$(dirname ${HERE})
 
@@ -17,10 +18,10 @@ kind load docker-image ${REGISTRY}/fluxqueue-postgres:latest
 kind load docker-image ${REGISTRY}/fluxqueue-scheduler:latest
 
 # And then install using the charts. The pull policy ensures we use the loaded ones
-helm uninstall fluxqueue --namespace fluxqueue-system --wait || true
+helm uninstall fluxqueue --namespace ${NAMESPACE} --wait || true
 
 # So we don't try to interact with old webhook, etc.
-sleep 10
+sleep 5
 helm install \
   --set controllerManager.manager.image.repository=${REGISTRY}/fluxqueue \
   --set controllerManager.manager.image.tag=latest \
@@ -28,7 +29,7 @@ helm install \
   --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
   --set controllerManager.manager.imagePullPolicy=Never \
   --set controllerManager.fluxion.image.tag=grow-api \
-  --namespace fluxqueue-system \
+  --namespace ${NAMESPACE} \
   --create-namespace \
   --set scheduler.pullPolicy=Never \
   --set postgres.pullPolicy=Never \
