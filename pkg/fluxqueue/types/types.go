@@ -30,3 +30,8 @@ type JobModel struct {
 	Duration    int32  `db:"duration"`
 	Size        int32  `db:"size"`
 }
+
+type ReservationModel struct {
+	JobId int64  `db:"flux_id"`
+	Name  string `db:"name"`
+}

@@ -51,14 +51,17 @@ func (EasyBackfill) AddWorkers(workers *river.Workers, cfg rest.Config) error {
 	if err != nil {
 		return err
 	}
-
 	cleanupWorker, err := work.NewCleanupWorker(cfg)
 	if err != nil {
 		return err
 	}
-
+	reservationWorker, err := work.NewReservationWorker(cfg)
+	if err != nil {
+		return err
+	}
 	river.AddWorker(workers, jobWorker)
 	river.AddWorker(workers, cleanupWorker)
+	river.AddWorker(workers, reservationWorker)
 	return nil
 }
 
@@ -97,13 +100,6 @@ func (s EasyBackfill) Cleanup(
 		if err != nil {
 			return err
 		}
-		// TODO do we need to delete from database table?
-		// Now cleanup!
-		//dRows, err := pool.Query(ctx, queries.DeleteReservationsQuery)
-		//if err != nil {
-		//	return err
-		//}
-		//defer dRows.Close()
 	}
 	return nil
 }

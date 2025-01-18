@@ -18,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
+	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/defaults"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
 	strategies "github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/strategy/workers"
@@ -25,7 +26,8 @@ import (
 )
 
 const (
-	queueMaxWorkers = 10
+	// IMPORTANT: must be one because fluxion is run single threaded
+	queueMaxWorkers = 1
 	mutexLocked     = 1
 )
 
@@ -102,7 +104,6 @@ func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 			// Default queue handles job allocation
 			river.QueueDefault: {MaxWorkers: queueMaxWorkers},
 
-			// TODO do we have control of deletions?
 			// Cleanup queue is typically for cancel
 			"cleanup_queue": {MaxWorkers: queueMaxWorkers},
 		},
@@ -133,7 +134,7 @@ func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 	}, nil
 }
 
-// StopQueue creates a client (without calling start) only intended to
+// Stop creates a client (without calling start) only intended to
 // issue stop, so we can leave out workers and queue from Config
 func (q *Queue) Stop(ctx context.Context) error {
 	if q.riverClient != nil {
@@ -212,6 +213,7 @@ func (q *Queue) Schedule() error {
 	defer q.lock.Unlock()
 
 	// This generates a batch of jobs to send to ask Fluxion for nodes
+	// It's a batch, but sent to only one worker.
 	batch, err := q.Strategy.Schedule(q.Context, q.Pool, q.ReservationDepth)
 	if err != nil {
 		return err
@@ -219,7 +221,12 @@ func (q *Queue) Schedule() error {
 
 	// Run each job task to schedule nodes for it (or ask again later)
 	if len(batch) > 0 {
-		_, err := q.riverClient.InsertMany(q.Context, batch)
+
+		// Add the reservation clean up job (run at the end)
+		reservationJob := q.clearReservationJob()
+		batch = append(batch, reservationJob)
+
+		_, err = q.riverClient.InsertMany(q.Context, batch)
 		if err != nil {
 			return err
 		}
@@ -235,4 +242,17 @@ func (q *Queue) Schedule() error {
 
 	// Post submit functions for a queue strategy
 	return q.Strategy.PostSubmit(q.Context, q.Pool, q.riverClient)
+}
+
+// clearReservationJob
+// 1. retrieve flux ids from the table
+// 2. Issue cancel to fluxion to remove from graph
+// 3. clear table for next loop
+func (q *Queue) clearReservationJob() river.InsertManyParams {
+	insertOpts := river.InsertOpts{
+		MaxAttempts: defaults.MaxAttempts,
+		Tags:        []string{"reservation"},
+		Queue:       river.QueueDefault,
+	}
+	return river.InsertManyParams{Args: workers.ReservationArgs{}, InsertOpts: &insertOpts}
 }

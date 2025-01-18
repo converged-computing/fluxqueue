@@ -20,13 +20,14 @@ kind load docker-image ${REGISTRY}/fluxqueue-scheduler:latest
 helm uninstall fluxqueue --namespace fluxqueue-system --wait || true
 
 # So we don't try to interact with old webhook, etc.
-sleep 5
+sleep 10
 helm install \
   --set controllerManager.manager.image.repository=${REGISTRY}/fluxqueue \
   --set controllerManager.manager.image.tag=latest \
   --set scheduler.image=${REGISTRY}/fluxqueue-scheduler:latest \
   --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
   --set controllerManager.manager.imagePullPolicy=Never \
+  --set controllerManager.fluxion.image.tag=grow-api \
   --namespace fluxqueue-system \
   --create-namespace \
   --set scheduler.pullPolicy=Never \

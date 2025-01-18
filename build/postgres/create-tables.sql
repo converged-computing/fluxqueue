@@ -13,8 +13,8 @@ CREATE TABLE pending_queue (
 
 CREATE UNIQUE INDEX pending_index ON pending_queue (name, namespace);
 
--- We only need the fluxid for a reservation
--- CREATE TABLE reservations (
---     group_name TEXT NOT NULL,
---     flux_id INTEGER NOT NULL
--- );
+-- We only need the fluxid for a reservation, but store the group name for debugging
+CREATE TABLE reservations (
+     name TEXT NOT NULL,
+     flux_id INTEGER NOT NULL
+);

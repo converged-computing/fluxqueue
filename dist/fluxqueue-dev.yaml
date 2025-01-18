@@ -78,6 +78,9 @@ spec:
               jobspec:
                 description: JobSpec is the Flux jobspec
                 type: string
+              name:
+                description: Original name of the job
+                type: string
               nodes:
                 description: Nodes needed for the job
                 format: int32
@@ -231,6 +234,42 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/exec
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/log
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -444,7 +483,7 @@ spec:
         - name: PGPASSWORD
           value: postgres
         image: ghcr.io/converged-computing/fluxqueue:test
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         livenessProbe:
           httpGet:
             path: /healthz
@@ -464,6 +503,8 @@ spec:
             - |
               status=$(curl -ks http://localhost:8081/readyz); if [ "$status" != "ok" ]; then exit 1; fi
               pg_isready -d postgres -h postgres -p 5432 -U postgres;
+          initialDelaySeconds: 20
+          periodSeconds: 20
         resources:
           limits:
             cpu: 500m
@@ -484,7 +525,7 @@ spec:
         - /code/bin/server
         - --port=4242
         image: ghcr.io/converged-computing/fluxion:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         name: fluxion
       securityContext:
         seccompProfile:
