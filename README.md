@@ -195,6 +195,20 @@ Next I'll finish up job (not a lot to do) and work on edge cases of cancel to Fl
 
 ## Development
 
+### Reservations
+
+> How do reservations work?
+
+ - We have a queue with one worker that sends jobs to the scheduler. This is important because Fluxion is single threaded, and we need the "clear reservation" job to run last.
+ - The scheduler does everything that it can, and then it starts reserving things (e.g., easy allows 1 reservation)
+ - Reservations block off resources in fluxion and give an estimated start time.
+ - Reservations are cleared after the loop. This means that later jobs (smaller) aren't given resources that should go to larger jobs (with higher priority)
+ - A single job to clear reservations is added to the end of a schedule loop. E.g.,
+   - We retrieve reservation ids
+   - We issue a cancel to fluxion
+   - On success, we delete the reservation ID from the table
+
+
 ### Debugging Postgres
 
 It is often helpful to shell into the postgres container to see the database directly:
@@ -213,7 +227,8 @@ psql -U postgres
 \dt
 
 # test a query
-SELECT group_name, group_size from pods_provisional;
+SELECT * from pending_queue;
+SELECT * from reservations;
 ```
 
 ### TODO
@@ -222,17 +237,6 @@ SELECT group_name, group_size from pods_provisional;
   - we need to use shrink here. And a shrink down to size 0 I assume is a cancel.
 - [ ] For cancel, we would issue a cancel for every pod associated with a job. How can we avoid that (or is that OK?)
 - [ ] we will eventually need another mechanism to move schedule queue aside from new submission
-- [ ] River is task based, so the entire concept of a loop is not relevant. We are asking flux asynchronously. The schedule loop, in that it kicks of different river jobs, isn't actually a loop - they run in sync, potentially. 
-   - So the reservation strategy doesn't make sense because there is no "end" point.
-   - Currently I'm just going to set the reservationDepth to 0
-- Reservations notes:
- - We have a queue that sends jobs to the scheduler
- - The scheduler does everything that it can, and then it starts reserving things
- - Reservations block off resources and give an estimated start time.
- - Reservations are cleared after the loop.
- - If reservation set to true, it will keep looking for earliest time in future.
- - Reservations are saving state of those jobs for the scheduler JUST during the loop
- - The reservations are cleared out after the loop.
 - [ ] scheduleAt can be used to AskFlux in the future
 - [ ] Nodes that are currently assigned need to be taken into account
    - Right now they aren't included in resources, but instead should be "given" to Fluxion.

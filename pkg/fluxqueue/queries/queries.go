@@ -19,7 +19,8 @@ const (
 	SelectPendingByCreation = "select jobspec, name, flux_job_name, namespace, type, reservation, duration, size from pending_queue order by created_at desc;"
 
 	// Reservations
-	AddReservationQuery     = "insert into reservations (group_name, flux_id) values ($1, $2);"
-	DeleteReservationsQuery = "truncate reservations; delete from reservations;"
-	GetReservationsQuery    = "select (group_name, flux_id) from reservations;"
+	AddReservationQuery           = "insert into reservations (name, flux_id) values ($1, $2);"
+	DeleteReservationsQuery       = "truncate reservations; delete from reservations;"
+	DeleteSingleReservationsQuery = "delete from reservations where flux_id=$1;"
+	GetReservationsQuery          = "select (name, flux_id) from reservations;"
 )

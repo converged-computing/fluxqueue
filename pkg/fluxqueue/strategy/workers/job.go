@@ -247,11 +247,7 @@ func (w JobWorker) unsuspendJob(namespace, name string, nodes []string, fluxId i
 	nodesStr := strings.Join(nodes, "__")
 	payload := `{"spec": {"suspend": false, "template": {"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}}}`
 	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.StrategicMergePatchType, []byte(payload), metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	// And unsuspend the job
-	return patchUnsuspend(ctx, client, name, namespace)
+	return err
 }
 
 // patchUnsuspend patches a pod to unsuspend it.
