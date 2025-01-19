@@ -28,6 +28,7 @@ import (
 const (
 	// IMPORTANT: must be one because fluxion is run single threaded
 	queueMaxWorkers = 1
+	taskMaxWorkers  = 1
 	mutexLocked     = 1
 )
 
@@ -105,7 +106,13 @@ func NewQueue(ctx context.Context, cfg rest.Config) (*Queue, error) {
 			river.QueueDefault: {MaxWorkers: queueMaxWorkers},
 
 			// Cleanup queue is typically for cancel
+			// Note that if this needs to be single threaded,
+			// it should be done in the default queue
 			"cleanup_queue": {MaxWorkers: queueMaxWorkers},
+
+			// This is for Kubernetes tasks (ungate, etc)
+			// that don't need to be single threaded
+			"task_queue": {MaxWorkers: taskMaxWorkers},
 		},
 		Workers: workers,
 	})

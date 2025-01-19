@@ -32,6 +32,7 @@ And we use `ghcr.io/converged-computing/fluxion` for the fluxion service.
 ### Choices
 
 - **Duration of job comes from Kubernetes** Right now, we don't allow a special or different duration to be given to Fluxion. Any duration or deletion needs to come from Kubernetes first, by way of an object deletion. Otherwise we would need to orchestrate deletion from the cluster and Fluxion, and it's easier to ask the user to delete with a job duration or other mechanism.
+- **ungate** is done as a retryable task, the reason being that API operations to Kubernetes are not always reliable.
 
 ## Deploy
 
@@ -233,7 +234,7 @@ SELECT * from reservations;
 
 ### TODO
 
-- [ ] need to cleanup - handle FluxJob object so doesn't keep reconciling. Likely we want to delete at some point.
+- [ ] Pod creation needs better orchestration
 - [ ] In the case of jobs that are changing (e.g., pods deleting, but we don't want to kill entire job) what should we do?
   - we need to use shrink here. And a shrink down to size 0 I assume is a cancel.
 - [ ] For cancel, we would issue a cancel for every pod associated with a job. How can we avoid that (or is that OK?)

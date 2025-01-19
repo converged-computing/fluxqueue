@@ -47,6 +47,8 @@ type ReservationModel struct {
 // job worker: a queue to submit jobs to fluxion
 // cleanup worker: a queue to cleanup
 func (EasyBackfill) AddWorkers(workers *river.Workers, cfg rest.Config) error {
+
+	// These workers are in the default (fluxion) queue with one worker
 	jobWorker, err := work.NewJobWorker(cfg)
 	if err != nil {
 		return err
@@ -59,9 +61,16 @@ func (EasyBackfill) AddWorkers(workers *river.Workers, cfg rest.Config) error {
 	if err != nil {
 		return err
 	}
+
+	// These workers can be run concurrently (>1 worker)
+	ungateWorker, err := work.NewUngateWorker(cfg)
+	if err != nil {
+		return err
+	}
 	river.AddWorker(workers, jobWorker)
 	river.AddWorker(workers, cleanupWorker)
 	river.AddWorker(workers, reservationWorker)
+	river.AddWorker(workers, ungateWorker)
 	return nil
 }
 

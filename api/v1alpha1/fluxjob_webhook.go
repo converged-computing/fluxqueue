@@ -54,6 +54,14 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	marshalledDeployment, tryNext, err := a.HandleDeployment(ctx, req)
+	if err == nil {
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledDeployment)
+	}
+	if !tryNext {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+
 	marshalledPod, err := a.HandlePod(ctx, req)
 	if err == nil {
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
