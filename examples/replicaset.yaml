@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: replicaset
+  labels:
+    app: replicaset
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: replicaset
+  template:
+    metadata:
+      labels:
+        app: replicaset
+    spec:
+      containers:
+      - name: container
+        image: registry.k8s.io/pause:2.0

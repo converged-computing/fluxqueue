@@ -31,4 +31,6 @@ webhooks:
     - pods
     - jobs
     - deployments
+    - replicasets
+    - statefulsets
   sideEffects: None

@@ -30,6 +30,8 @@ const (
 	JobWrappedPod JobWrapped = iota
 	JobWrappedJob
 	JobWrappedDeployment
+	JobWrappedReplicaSet
+	JobWrappedStatefulSet
 
 	SubmitStatusNew    SubmitStatus = "statusNew"
 	SubmitStatusSubmit SubmitStatus = "statusSubmit"
@@ -49,6 +51,12 @@ func GetJobName(jobType JobWrapped, name string) string {
 		return fmt.Sprintf("%s-job", name)
 	case JobWrappedPod:
 		return fmt.Sprintf("%s-pod", name)
+	case JobWrappedDeployment:
+		return fmt.Sprintf("%s-deployment", name)
+	case JobWrappedReplicaSet:
+		return fmt.Sprintf("%s-replicaset", name)
+	case JobWrappedStatefulSet:
+		return fmt.Sprintf("%s-statefulset", name)
 	}
 	return fmt.Sprintf("%s-unknown", name)
 }

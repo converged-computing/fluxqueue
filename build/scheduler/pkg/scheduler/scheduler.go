@@ -77,18 +77,16 @@ func (fs *FluxionScheduler) PreFilter(ctx context.Context, state *framework.Cycl
 		return nil, framework.NewStatus(framework.UnschedulableAndUnresolvable, "Pod missing nodes label")
 	}
 
-	// Create a map to store the JSON data
+	// Split nodes based on separator
 	nodes := strings.Split(nodesLabel, "__")
 
-	// Does this pod have an index? (e.g., stateful set)
-	podIndex, ok := pod.ObjectMeta.Labels["apps.kubernetes.io/pod-index"]
-	if !ok {
+	// Indexed jobs have batch completion index (job pod)
+	// TODO: if this is an issue, put constraint on pod instead
+	podIndex, ok := pod.ObjectMeta.Labels["batch.kubernetes.io/job-completion-index"]
 
-		// Next try for batch completion index (job pod)
-		podIndex, ok = pod.ObjectMeta.Labels["batch.kubernetes.io/job-completion-index"]
-		if !ok {
-			podIndex = "0"
-		}
+	// TODO can also check that len(nodes) here is 1
+	if !ok {
+		podIndex = "0"
 	}
 	index, err := strconv.Atoi(podIndex)
 	if err != nil {

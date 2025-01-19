@@ -140,3 +140,84 @@ func (a *jobReceiver) EnqueueDeployment(ctx context.Context, deployment *appsv1.
 		deployment.Spec.Template.Spec.Containers,
 	)
 }
+
+// TODO this is redundant with deployment, can we consolidate
+func (a *jobReceiver) EnqueueReplicaSet(ctx context.Context, rs *appsv1.ReplicaSet) error {
+	logger.Info("Contender replicaset", "Name", rs.Name, "Namespace", rs.Namespace)
+	if rs.Spec.Template.ObjectMeta.Labels == nil {
+		rs.Spec.Template.ObjectMeta.Labels = map[string]string{}
+	}
+	if rs.ObjectMeta.Labels == nil {
+		rs.ObjectMeta.Labels = map[string]string{}
+	}
+
+	// Cut out early if we are getting hit again
+	_, ok := rs.ObjectMeta.Labels[defaults.SeenLabel]
+	if ok {
+		return nil
+	}
+	rs.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	rs.Spec.Template.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	rs.Spec.Template.Spec.SchedulerName = defaults.SchedulerName
+
+	// Gate the pods under the deployment
+	if rs.Spec.Template.Spec.SchedulingGates == nil {
+		rs.Spec.Template.Spec.SchedulingGates = []corev1.PodSchedulingGate{}
+	}
+	fluxqGate := corev1.PodSchedulingGate{Name: defaults.SchedulingGateName}
+	rs.Spec.Template.Spec.SchedulingGates = append(rs.Spec.Template.Spec.SchedulingGates, fluxqGate)
+
+	// We will use this later as a selector to get pods associated with the deployment
+	selector := fmt.Sprintf("replicaset-%s-%s", rs.Name, rs.Namespace)
+	rs.Spec.Template.ObjectMeta.Labels[defaults.SelectorLabel] = selector
+
+	logger.Info("received replicaset and gated pods", "Name", rs.Name)
+	return SubmitFluxJob(
+		ctx,
+		JobWrappedReplicaSet,
+		rs.Name,
+		rs.Namespace,
+		*rs.Spec.Replicas,
+		rs.Spec.Template.Spec.Containers,
+	)
+}
+
+func (a *jobReceiver) EnqueueStatefulSet(ctx context.Context, ss *appsv1.StatefulSet) error {
+	logger.Info("Contender statefulset", "Name", ss.Name, "Namespace", ss.Namespace)
+	if ss.Spec.Template.ObjectMeta.Labels == nil {
+		ss.Spec.Template.ObjectMeta.Labels = map[string]string{}
+	}
+	if ss.ObjectMeta.Labels == nil {
+		ss.ObjectMeta.Labels = map[string]string{}
+	}
+
+	// Cut out early if we are getting hit again
+	_, ok := ss.ObjectMeta.Labels[defaults.SeenLabel]
+	if ok {
+		return nil
+	}
+	ss.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	ss.Spec.Template.ObjectMeta.Labels[defaults.SeenLabel] = "yes"
+	ss.Spec.Template.Spec.SchedulerName = defaults.SchedulerName
+
+	// Gate the pods under the deployment
+	if ss.Spec.Template.Spec.SchedulingGates == nil {
+		ss.Spec.Template.Spec.SchedulingGates = []corev1.PodSchedulingGate{}
+	}
+	fluxqGate := corev1.PodSchedulingGate{Name: defaults.SchedulingGateName}
+	ss.Spec.Template.Spec.SchedulingGates = append(ss.Spec.Template.Spec.SchedulingGates, fluxqGate)
+
+	// We will use this later as a selector to get pods associated with the deployment
+	selector := fmt.Sprintf("statefulset-%s-%s", ss.Name, ss.Namespace)
+	ss.Spec.Template.ObjectMeta.Labels[defaults.SelectorLabel] = selector
+
+	logger.Info("received statefulset and gated pods", "Name", ss.Name)
+	return SubmitFluxJob(
+		ctx,
+		JobWrappedStatefulSet,
+		ss.Name,
+		ss.Namespace,
+		*ss.Spec.Replicas,
+		ss.Spec.Template.Spec.Containers,
+	)
+}
