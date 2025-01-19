@@ -76,6 +76,7 @@ while true
   sleep 10
 done
 
+sleep 3
 echo_run kubectl get pods
 
 # The pod should be running, and scheduler should be fluxion
