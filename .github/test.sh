@@ -20,7 +20,6 @@ echo "Found fluxqueue scheduler pod:  ${scheduler_pod}"
 postgres_pod=$(kubectl get pods -n ${namespace} -o json | jq -r .items[2].metadata.name)
 echo "Found fluxqueue postgres pod:   ${postgres_pod}"
 
-
 # Wait for fluxion to pull (largest container)
 while true
   do
@@ -65,9 +64,18 @@ function check_output {
   fi
 }
 
-# Now create the pod and job
-echo_run kubectl apply -f ./examples/pod.yaml
-sleep 3
+# Wait for webhook to be ready and submit the pod
+while true
+  do
+  echo_run kubectl apply -f ./examples/pod.yaml
+  retval=$?
+  if [[ "${retval}" == "0" ]]; then
+    echo "Webhook for ${controller_pod} is ready"
+    break
+  fi
+  sleep 10
+done
+
 echo_run kubectl get pods
 
 # The pod should be running, and scheduler should be fluxion
