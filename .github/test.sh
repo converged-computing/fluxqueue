@@ -67,9 +67,9 @@ function check_output {
 # Wait for webhook to be ready and submit the pod
 while true
   do
-  echo_run kubectl apply -f ./examples/pod.yaml
-  retval=$?
-  if [[ "${retval}" == "0" ]]; then
+  success=true
+  echo_run kubectl apply -f ./examples/pod.yaml || success=false
+  if [[ "${success}" == "true" ]]; then
     echo "Webhook for ${controller_pod} is ready"
     break
   fi
