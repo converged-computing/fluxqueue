@@ -112,9 +112,11 @@ func (r *FluxJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	rlog.Info("Found FluxJob", "Name", spec.Name, "Namespace", spec.Namespace, "Status", spec.Status.SubmitStatus)
 	result := ctrl.Result{}
 
-	// If the job is already submit, continue
+	// If the job is already submit, delete it
 	if spec.Status.SubmitStatus == api.SubmitStatusSubmit {
-		return result, nil
+		rlog.Info("Deleting FluxJob that is submit", "Name", spec.Name, "Namespace", spec.Namespace, "Status", spec.Status.SubmitStatus)
+		err = r.Client.Delete(ctx, &spec)
+		return result, err
 	}
 
 	// Submit the job to the queue - TODO if error, should delete?

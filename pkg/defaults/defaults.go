@@ -8,5 +8,6 @@ var (
 	FluxJobIdLabel     = "fluxqueue/jobid"
 	NodesLabel         = "fluxqueue/fluxion-nodes"
 	SeenLabel          = "fluxqueue.seen"
+	SelectorLabel      = "fluxqueue.selector"
 	UnschedulableLabel = "fluxqueue/unschedulable"
 )

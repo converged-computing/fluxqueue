@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/converged-computing/fluxion/pkg/client"
@@ -123,7 +124,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	wlog.Info("Fluxion allocation response", "Nodes", nodes)
 
 	// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
-	err = w.releaseJob(job.Args, fluxID, nodes)
+	err = w.releaseJob(ctx, job.Args, fluxID, nodes)
 	if err != nil {
 		return err
 	}
@@ -132,7 +133,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 }
 
 // Release job will unsuspend a job or ungate pods to allow for scheduling
-func (w JobWorker) releaseJob(args JobArgs, fluxID int64, nodes []string) error {
+func (w JobWorker) releaseJob(ctx context.Context, args JobArgs, fluxID int64, nodes []string) error {
 	var err error
 
 	if args.Type == api.JobWrappedJob.String() {
@@ -145,15 +146,8 @@ func (w JobWorker) releaseJob(args JobArgs, fluxID int64, nodes []string) error 
 		}
 		wlog.Info("Success unsuspending job", "Namespace", args.Namespace, "Name", args.Name)
 
-	} else if args.Type == api.JobWrappedPod.String() {
-
-		// Pod Type
-		err = w.ungatePod(args.Namespace, args.Name, nodes, fluxID)
-		if err != nil {
-			wlog.Info("Error ungating pod", "Namespace", args.Namespace, "Name", args.Name, "Error", err)
-			return err
-		}
-		wlog.Info("Success ungating pod", "Namespace", args.Namespace, "Name", args.Name)
+	} else if args.Type == api.JobWrappedDeployment.String() || args.Type == api.JobWrappedPod.String() {
+		w.ungatePod(ctx, args.Namespace, args.Name, args.Type, nodes, fluxID)
 
 	} else {
 
@@ -274,32 +268,38 @@ func (w JobWorker) rejectJob(namespace, name string) error {
 	return patchUnsuspend(ctx, client, name, namespace)
 }
 
-// Ungate the pod, adding an annotation for nodes along with the fluxion scheduler
-func (w JobWorker) ungatePod(namespace, name string, nodes []string, fluxId int64) error {
-	ctx := context.Background()
+// ungatePod submits jobs to ungate. We do this because Kubernetes isn't always reliable
+// to get pods that we need via the API, or operations to patch, etc.
+func (w JobWorker) ungatePod(
+	ctx context.Context,
+	namespace, name, jobType string,
+	nodes []string,
+	fluxId int64,
+) error {
 
-	// Get the pod to update
-	client, err := kubernetes.NewForConfig(&w.RESTConfig)
-	if err != nil {
-		return err
+	// Create a job to ungate the deployment pods
+	riverClient := river.ClientFromContext[pgx.Tx](ctx)
+	insertOpts := river.InsertOpts{
+		Tags:  []string{"ungate"},
+		Queue: "task_queue",
 	}
-	// Convert jobid to string
-	jobid := fmt.Sprintf("%d", fluxId)
-
-	// Patch the pod to add the nodes
-	nodesStr := strings.Join(nodes, "__")
-	payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}`
-	fmt.Println(payload)
-	_, err = client.CoreV1().Pods(namespace).Patch(ctx, name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
-	if err != nil {
-		return err
+	ungateArgs := UngateArgs{
+		Name:      name,
+		Namespace: namespace,
+		Nodes:     nodes,
+		JobID:     fluxId,
+		Type:      jobType,
 	}
-	return removeGate(ctx, client, namespace, name)
+	_, err := riverClient.Insert(ctx, ungateArgs, &insertOpts)
+	if err != nil {
+		wlog.Info("Error inserting ungate job", "Namespace", namespace, "Name", name, "Error", err)
+	}
+	return err
 }
 
 // removeGate removes the scheduling gate from the pod
 func removeGate(ctx context.Context, client *kubernetes.Clientset, namespace, name string) error {
-	pod, err := client.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}

@@ -25,8 +25,15 @@ while true
   do
   pod_status=$(kubectl get pods ${controller_pod} -n ${namespace} --no-headers -o custom-columns=":status.phase")
   if [[ "${pod_status}" == "Running" ]]; then
-    echo "Controller ${controller_pod} is ready"
-    break
+    echo "Controller ${controller_pod} is running"
+
+    # They also need to be ready
+    ready=true
+    kubectl get pods -n ${namespace} ${controller_pod} | grep "2/2" || ready=false
+    if [[ "${ready}" == "true" ]]; then
+        echo "Controller ${controller_pod} containers are ready"      
+        break
+    fi
   fi
   sleep 20
 done
@@ -96,10 +103,13 @@ echo "                Pods Running: ${pods_running}"
 check_output 'check-pod-deleted' "${pods_running}" "0"
 
 # Do the same for a job
-echo_run kubectl apply -f ./examples/job.yaml
+echo_run kubectl apply -f ./examples/job-1.yaml
 sleep 3
 echo_run kubectl get pods
-
+echo_run kubectl logs -n ${namespace} ${controller_pod} -c manager
+pods_running=$(kubectl get pods -o json | jq -r '.items | length')
+echo "                Pods Running: ${pods_running}"
+check_output 'check-pods-running' "${pods_running}" "1"
 
 # Check both job pods
 for pod in $(kubectl get pods -o json | jq -r .items[].metadata.name)
@@ -116,7 +126,38 @@ done
 
 
 # Now delete the job - we are done!
-echo_run kubectl delete -f ./examples/job.yaml
+echo_run kubectl delete -f ./examples/job-1.yaml
+sleep 2
+pods_running=$(kubectl get pods -o json | jq -r '.items | length')
+echo "                Pods Running: ${pods_running}"
+check_output 'check-pod-deleted' "${pods_running}" "0"
+
+
+
+# Deployment
+echo_run kubectl apply -f ./examples/deployment-1.yaml
+sleep 5
+echo_run kubectl get pods
+pods_running=$(kubectl get pods -o json | jq -r '.items | length')
+echo "                Pods Running: ${pods_running}"
+check_output 'check-pods-running' "${pods_running}" "1"
+echo_run kubectl logs -n ${namespace} ${controller_pod} -c manager
+
+# Check both job pods
+for pod in $(kubectl get pods -o json | jq -r .items[].metadata.name)
+  do 
+  echo "Checking deployment pod ${pod}"
+  scheduled_by=$(kubectl get pod ${pod} -o json | jq -r .spec.schedulerName)
+  pod_status=$(kubectl get pods ${pod} --no-headers -o custom-columns=":status.phase")
+  echo
+  echo "                  Pod Status: ${pod_status}"
+  echo "                Scheduled by: ${scheduled_by}"
+  check_output 'check-pod-scheduled-by' "${scheduled_by}" "FluxionScheduler"
+  check_output 'check-pod-status' "${pod_status}" "Running"
+done
+
+# Now delete the job - we are done!
+echo_run kubectl delete -f ./examples/deployment-1.yaml
 sleep 2
 pods_running=$(kubectl get pods -o json | jq -r '.items | length')
 echo "                Pods Running: ${pods_running}"

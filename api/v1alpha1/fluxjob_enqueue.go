@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	appsv1 "k8s.io/api/apps/v1"
@@ -64,6 +65,9 @@ func (a *jobReceiver) EnqueueJob(ctx context.Context, job *batchv1.Job) error {
 	if job.Spec.Template.ObjectMeta.Labels == nil {
 		job.Spec.Template.ObjectMeta.Labels = map[string]string{}
 	}
+	if job.ObjectMeta.Labels == nil {
+		job.ObjectMeta.Labels = map[string]string{}
+	}
 
 	// Cut out early if we are getting hit again
 	_, ok := job.ObjectMeta.Labels[defaults.SeenLabel]
@@ -102,6 +106,9 @@ func (a *jobReceiver) EnqueueDeployment(ctx context.Context, deployment *appsv1.
 	if deployment.Spec.Template.ObjectMeta.Labels == nil {
 		deployment.Spec.Template.ObjectMeta.Labels = map[string]string{}
 	}
+	if deployment.ObjectMeta.Labels == nil {
+		deployment.ObjectMeta.Labels = map[string]string{}
+	}
 
 	// Cut out early if we are getting hit again
 	_, ok := deployment.ObjectMeta.Labels[defaults.SeenLabel]
@@ -118,6 +125,10 @@ func (a *jobReceiver) EnqueueDeployment(ctx context.Context, deployment *appsv1.
 	}
 	fluxqGate := corev1.PodSchedulingGate{Name: defaults.SchedulingGateName}
 	deployment.Spec.Template.Spec.SchedulingGates = append(deployment.Spec.Template.Spec.SchedulingGates, fluxqGate)
+
+	// We will use this later as a selector to get pods associated with the deployment
+	selector := fmt.Sprintf("deployment-%s-%s", deployment.Name, deployment.Namespace)
+	deployment.Spec.Template.ObjectMeta.Labels[defaults.SelectorLabel] = selector
 
 	logger.Info("received deployment and gated pods", "Name", deployment.Name)
 	return SubmitFluxJob(
