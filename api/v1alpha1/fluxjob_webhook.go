@@ -62,6 +62,22 @@ func (a *jobReceiver) Handle(ctx context.Context, req admission.Request) admissi
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	marshalledRS, tryNext, err := a.HandleReplicaSet(ctx, req)
+	if err == nil {
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledRS)
+	}
+	if !tryNext {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	marshalledSS, tryNext, err := a.HandleStatefulSet(ctx, req)
+	if err == nil {
+		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledSS)
+	}
+	if !tryNext {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+
 	marshalledPod, err := a.HandlePod(ctx, req)
 	if err == nil {
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledPod)
@@ -144,7 +160,45 @@ func (a *jobReceiver) HandleDeployment(ctx context.Context, req admission.Reques
 	}
 	marshalledDeployment, err = json.Marshal(deployment)
 	if err != nil {
-		logger.Error(err, "marshalling job")
+		logger.Error(err, "marshalling deployment")
 	}
 	return marshalledDeployment, false, err
+}
+
+func (a *jobReceiver) HandleReplicaSet(ctx context.Context, req admission.Request) ([]byte, bool, error) {
+	marshalledRS := []byte{}
+	rs := &appsv1.ReplicaSet{}
+	err := a.decoder.Decode(req, rs)
+	if err != nil {
+		return marshalledRS, true, err
+	}
+	err = a.EnqueueReplicaSet(ctx, rs)
+	if err != nil {
+		logger.Error(err, "enqueue replicaset")
+		return marshalledRS, false, err
+	}
+	marshalledRS, err = json.Marshal(rs)
+	if err != nil {
+		logger.Error(err, "marshalling replicaset")
+	}
+	return marshalledRS, false, err
+}
+
+func (a *jobReceiver) HandleStatefulSet(ctx context.Context, req admission.Request) ([]byte, bool, error) {
+	marshalledSS := []byte{}
+	ss := &appsv1.StatefulSet{}
+	err := a.decoder.Decode(req, ss)
+	if err != nil {
+		return marshalledSS, true, err
+	}
+	err = a.EnqueueStatefulSet(ctx, ss)
+	if err != nil {
+		logger.Error(err, "enqueue statefulset")
+		return marshalledSS, false, err
+	}
+	marshalledSS, err = json.Marshal(ss)
+	if err != nil {
+		logger.Error(err, "marshalling statefulset")
+	}
+	return marshalledSS, false, err
 }

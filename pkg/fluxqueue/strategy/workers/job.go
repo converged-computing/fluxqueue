@@ -146,7 +146,10 @@ func (w JobWorker) releaseJob(ctx context.Context, args JobArgs, fluxID int64, n
 		}
 		wlog.Info("Success unsuspending job", "Namespace", args.Namespace, "Name", args.Name)
 
-	} else if args.Type == api.JobWrappedDeployment.String() || args.Type == api.JobWrappedPod.String() {
+	} else if args.Type == api.JobWrappedDeployment.String() ||
+		args.Type == api.JobWrappedPod.String() ||
+		args.Type == api.JobWrappedReplicaSet.String() ||
+		args.Type == api.JobWrappedStatefulSet.String() {
 		w.ungatePod(ctx, args.Namespace, args.Name, args.Type, nodes, fluxID)
 
 	} else {
@@ -240,6 +243,23 @@ func (w JobWorker) unsuspendJob(namespace, name string, nodes []string, fluxId i
 	nodesStr := strings.Join(nodes, "__")
 	payload := `{"spec": {"suspend": false, "template": {"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}}}`
 	_, err = client.BatchV1().Jobs(namespace).Patch(ctx, name, patchTypes.StrategicMergePatchType, []byte(payload), metav1.PatchOptions{})
+	return err
+}
+
+// A stateful set has an ordinal index and can be given to scheduler to assign
+// we only need to tweak this if for some reason the index is no longer valid
+// (e.g., scaling up and down)
+func (w JobWorker) ungateSet(namespace, name string, nodes []string, fluxId int64) error {
+	ctx := context.Background()
+
+	client, err := kubernetes.NewForConfig(&w.RESTConfig)
+	if err != nil {
+		return err
+	}
+	jobid := fmt.Sprintf("%d", fluxId)
+	nodesStr := strings.Join(nodes, "__")
+	payload := `{"spec": {"template": {"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + nodesStr + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}}}`
+	_, err = client.AppsV1().StatefulSets(namespace).Patch(ctx, name, patchTypes.StrategicMergePatchType, []byte(payload), metav1.PatchOptions{})
 	return err
 }
 

@@ -65,64 +65,69 @@ func (w UngateWorker) Work(ctx context.Context, job *river.Job[UngateArgs]) erro
 			wlog.Info("Error in removing single pod", "Error", err)
 			return err
 		}
+		return err
 	}
 
-	// For a deployment, we need to get the pods based on a selector
+	// If we get here, we have deployment, statefulset, replicaset
+	var selector string
 	if job.Args.Type == api.JobWrappedDeployment.String() {
-		selector := fmt.Sprintf("%s=deployment-%s-%s", defaults.SelectorLabel, job.Args.Name, job.Args.Namespace)
+		selector = fmt.Sprintf("%s=deployment-%s-%s", defaults.SelectorLabel, job.Args.Name, job.Args.Namespace)
+	} else if job.Args.Type == api.JobWrappedReplicaSet.String() {
+		selector = fmt.Sprintf("%s=replicaset-%s-%s", defaults.SelectorLabel, job.Args.Name, job.Args.Namespace)
+	} else if job.Args.Type == api.JobWrappedStatefulSet.String() {
+		selector = fmt.Sprintf("%s=statefulset-%s-%s", defaults.SelectorLabel, job.Args.Name, job.Args.Namespace)
+	}
 
-		// 4. Get pods in the default namespace
-		pods, err := client.CoreV1().Pods(job.Args.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: selector,
-		})
-		wlog.Info("Selector returned pods for nodes", "Pods", len(pods.Items), "Nodes", len(job.Args.Nodes))
+	// 4. Get pods in the default namespace
+	pods, err := client.CoreV1().Pods(job.Args.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	wlog.Info("Selector returned pods for nodes", "Pods", len(pods.Items), "Nodes", len(job.Args.Nodes))
+	if err != nil {
+		wlog.Info("Error listing pods in ungate worker", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
+		return err
+	}
+	// Ungate as many as we are able
+	for i, pod := range pods.Items {
 
-		if err != nil {
-			wlog.Info("Error listing pods in ungate worker", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
-			return err
+		// This shouldn't happen
+		if i >= len(pods.Items) {
+			wlog.Info("Warning - we have more pods than nodes")
+			break
 		}
-		// Ungate as many as we are able
-		for i, pod := range pods.Items {
 
-			// This shouldn't happen
-			if i >= len(pods.Items) {
-				wlog.Info("Warning - we have more pods than nodes")
-				break
-			}
-
-			// We should not try to ungate (and assign a node) to a pod that
-			// already has been ungated
-			ungated := true
-			if pod.Spec.SchedulingGates != nil {
-				for _, gate := range pod.Spec.SchedulingGates {
-					if gate.Name == defaults.SchedulingGateName {
-						ungated = false
-						break
-					}
+		// We should not try to ungate (and assign a node) to a pod that
+		// already has been ungated
+		ungated := true
+		if pod.Spec.SchedulingGates != nil {
+			for _, gate := range pod.Spec.SchedulingGates {
+				if gate.Name == defaults.SchedulingGateName {
+					ungated = false
+					break
 				}
 			}
-			if ungated {
-				continue
-			}
-			payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + job.Args.Nodes[i] + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}`
-			_, err = client.CoreV1().Pods(job.Args.Namespace).Patch(ctx, pod.ObjectMeta.Name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
-			if err != nil {
-				wlog.Info("Error in patching deployment pod", "Error", err)
-				return err
-			}
-			err = removeGate(ctx, client, pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
-			if err != nil {
-				wlog.Info("Error in removing deployment pod gate", "Error", err)
-				return err
-			}
 		}
+		if ungated {
+			continue
+		}
+		payload := `{"metadata": {"labels": {"` + defaults.NodesLabel + `": "` + job.Args.Nodes[i] + `", "` + defaults.FluxJobIdLabel + `": "` + jobid + `"}}}`
+		_, err = client.CoreV1().Pods(job.Args.Namespace).Patch(ctx, pod.ObjectMeta.Name, patchTypes.MergePatchType, []byte(payload), metav1.PatchOptions{})
+		if err != nil {
+			wlog.Info("Error in patching deployment pod", "Error", err)
+			return err
+		}
+		err = removeGate(ctx, client, pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
+		if err != nil {
+			wlog.Info("Error in removing deployment pod gate", "Error", err)
+			return err
+		}
+	}
 
-		// Kubernetes has not created the pod objects yet
-		// Returning an error will have it run again, with a delay
-		// https://riverqueue.com/docs/job-retries
-		if len(pods.Items) < len(job.Args.Nodes) {
-			return fmt.Errorf("ungate pods job did not have all pods")
-		}
+	// Kubernetes has not created the pod objects yet
+	// Returning an error will have it run again, with a delay
+	// https://riverqueue.com/docs/job-retries
+	if len(pods.Items) < len(job.Args.Nodes) {
+		return fmt.Errorf("ungate pods job did not have all pods")
 	}
 	return err
 }
