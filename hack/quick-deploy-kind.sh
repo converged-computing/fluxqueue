@@ -9,9 +9,6 @@ ROOT=$(dirname ${HERE})
 cd ${ROOT}
 make helm
 
-# These build each of the images. The sidecar is separate from the other two in src/
-make build-all REGISTRY=${REGISTRY} # SCHEDULER_IMAGE=fluxqueue # SIDECAR_IMAGE=fluxqueue-sidecar
-
 # We load into kind so we don't need to push/pull and use up internet data ;)
 kind load docker-image ${REGISTRY}/fluxqueue:latest
 kind load docker-image ${REGISTRY}/fluxqueue-postgres:latest

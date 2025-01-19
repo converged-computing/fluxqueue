@@ -1,0 +1,151 @@
+name: fluxqueue test
+
+on:
+  pull_request: {}
+  workflow_dispatch:
+
+jobs:
+  build-fluxqueue:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/converged-computing/fluxqueue
+    runs-on: ubuntu-latest
+    name: build fluxqueue controller
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.22
+
+    - name: Build Container
+      run: make docker-build
+
+    - name: Save Containers
+      run: docker save ${{ env.container }} | gzip > fluxqueue_latest.tar.gz
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluxqueue
+        path: fluxqueue_latest.tar.gz
+
+  build-postgres:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/converged-computing/fluxqueue-postgres
+    runs-on: ubuntu-latest
+    name: build postgres
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.22
+
+    - name: Build Container
+      run: make build-postgres
+
+    - name: Save Containers
+      run: docker save ${{ env.container }} | gzip > fluxqueue_postgres.tar.gz
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluxqueue-postgres
+        path: fluxqueue_postgres.tar.gz
+
+  build-scheduler:
+    permissions:
+      packages: write
+    env:
+      container: ghcr.io/converged-computing/fluxqueue-scheduler
+    runs-on: ubuntu-latest
+    name: build scheduler
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.22
+
+    - name: Build Container
+      run: make build-scheduler
+
+    - name: Save Containers
+      run: docker save ${{ env.container }} | gzip > fluxqueue_scheduler.tar.gz
+
+    - name: Upload container artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluxqueue-scheduler
+        path: fluxqueue_scheduler.tar.gz
+
+  test-fluxqueue:
+    needs: [build-fluxqueue, build-scheduler, build-postgres]
+    env:
+      registry: ghcr.io/converged-computing
+      namespace: fluxqueue-system
+      controller_container: ghcr.io/flux-framework/fluxqueue
+      scheduler_container: ghcr.io/flux-framework/fluxqueue-scheduler
+      postgres_container: ghcr.io/flux-framework/fluxqueue-postgres
+
+    runs-on: ubuntu-latest
+    name: test fluxqueue
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: ^1.22
+
+    - name: Download controller artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluxqueue
+        path: /tmp
+
+    - name: Download scheduler artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluxqueue-scheduler
+        path: /tmp
+
+    - name: Download postgres artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: fluxqueue-postgres
+        path: /tmp
+
+    - name: Make Space For Build
+      run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          
+    - name: Load Docker images
+      run: |
+        ls /tmp/*.tar.gz
+        docker load --input /tmp/fluxqueue_latest.tar.gz
+        rm /tmp/fluxqueue_latest.tar.gz
+        docker load --input /tmp/fluxqueue_scheduler.tar.gz
+        rm /tmp/fluxqueue_scheduler.tar.gz
+        docker load --input /tmp/fluxqueue_postgres.tar.gz
+        rm /tmp/fluxqueue_postgres.tar.gz
+        docker image ls -a | grep fluxqueue
+
+    - name: Create Kind Cluster
+      uses: helm/kind-action@v1.5.0
+      with:
+        cluster_name: kind
+        kubectl_version: v1.28.2
+        version: v0.20.0
+        config: ./.github/test-kind-config.yaml 
+                
+    - name: Install Cert Manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+        sleep 20
+
+    - name: Deploy Fluxqueue
+      run: ./hack/quick-deploy-kind.sh ${{ env.registry }} ${{ env.namespace }}
+    - name: Test Fluxqueue
+      run: /bin/bash ./.github/test.sh ${{ env.registry }} ${{ env.namespace }}

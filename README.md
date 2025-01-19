@@ -233,6 +233,7 @@ SELECT * from reservations;
 
 ### TODO
 
+- [ ] need to cleanup - handle FluxJob object so doesn't keep reconciling. Likely we want to delete at some point.
 - [ ] In the case of jobs that are changing (e.g., pods deleting, but we don't want to kill entire job) what should we do?
   - we need to use shrink here. And a shrink down to size 0 I assume is a cancel.
 - [ ] For cancel, we would issue a cancel for every pod associated with a job. How can we avoid that (or is that OK?)
