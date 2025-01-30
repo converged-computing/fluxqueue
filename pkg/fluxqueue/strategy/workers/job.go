@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 
 	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 	"github.com/converged-computing/fluxion/pkg/client"
@@ -77,15 +77,10 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
-	// Get rid of the attributes section (which should be empty)
-	parts := strings.Split(job.Args.Jobspec, "resources:")
-	satisfyJobspec := "attributes: {}\nresources:\n" + parts[len(parts)-1]
-	fmt.Println(satisfyJobspec)
-
 	// Prepare the request to allocate - convert string to bytes
 	// This Jobspec includes all slots (pods) so we get an allocation that considers that
 	// We assume reservation allows for the satisfy to be in the future
-	request := &pb.SatisfyRequest{Jobspec: satisfyJobspec, Reservation: job.Args.Reservation == 1}
+	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
 	fluxion, err := client.NewClient("127.0.0.1:4242")
@@ -96,7 +91,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	defer fluxion.Close()
 
 	// An error here is an error with making the request, nothing about the allocation
-	response, err := fluxion.Satisfy(fluxionCtx, request)
+	response, err := fluxion.Match(fluxionCtx, request)
 	if err != nil {
 		wlog.Info("[WORK] Fluxion did not receive any satisfy response", "Error", err)
 		return err
@@ -118,6 +113,15 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		return fmt.Errorf("fluxion could not allocate nodes for job %s/%s", job.Args.Namespace, job.Args.Name)
 	}
 
+	// If we get here, we have an allocation. Immediately cancel it.
+	fluxID := response.GetJobid()
+	cancelRequest := &pb.CancelRequest{JobID: fluxID}
+	_, err = fluxion.Cancel(fluxionCtx, cancelRequest)
+	if err != nil {
+		wlog.Error(err, "Canceling initial match alloc without constraint")
+		return err
+	}
+
 	// Parse the jobspec back into form to add the constraint for each node
 	var js jobspec.Jobspec
 	err = yaml.Unmarshal([]byte(job.Args.Jobspec), &js)
@@ -125,15 +129,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		wlog.Error(err, "Reparsing Jobspec to add constraint")
 		return err
 	}
-
-	// Add the constraint - we will be added one node assignment per pod.
-	// This means that instead of slot N, each request is for one slot
-	js.Attributes = jobspec.Attributes{
-		System: jobspec.System{
-			Constraints: jobspec.Constraints{},
-		},
-	}
-	js.Resources[0].Count = 1
+	js.Resources[0].Count = int32(1)
 
 	// Now get the nodes. These are actually cores assigned to nodes, so we need to keep count
 	nodes, err := parseNodes(response.Allocation)
@@ -147,8 +143,9 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	for slotNumber, node := range nodes {
 
 		// Update the jobspec for one node
-		js.Attributes.System.Constraints.Node = []string{node}
+		js.Attributes.System.Constraints.Hostlist = []string{node}
 		slotJobspec, err := yaml.Marshal(js)
+		fmt.Println(string(slotJobspec))
 
 		// TODO we probably want to cancel here
 		if err != nil {

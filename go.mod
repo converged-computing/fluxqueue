@@ -19,8 +19,8 @@ require (
 )
 
 require (
-	github.com/compspec/jobspec-go v0.0.0-20250130015255-577b7ffe2599 // indirect
-	github.com/converged-computing/fluxion v0.0.0-20250130005615-dcc147715430 // indirect
+	github.com/compspec/jobspec-go v0.0.0-20250130030627-58df7d7ed642 // indirect
+	github.com/converged-computing/fluxion v0.0.0-20250130025038-615e35a80230 // indirect
 )
 
 require (

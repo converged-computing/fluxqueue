@@ -38,15 +38,6 @@ func NewJobspec(name string, command []string, resources *Resources) (*v1.Jobspe
 		Resources: rSpec,
 		Tasks:     tasks,
 	}
-
-	// Attributes are for the system, we aren't going to add them yet
-	// attributes:
-	// system:
-	//   duration: 3600.
-	//   cwd: "/home/flux"
-	//   environment:
-	// 	HOME: "/home/flux"
-	// This is verison 1 as defined by v1 above
 	return &spec, nil
 }
 

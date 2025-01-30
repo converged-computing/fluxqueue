@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -58,7 +57,6 @@ func SubmitFluxJob(
 	// Generate a jobspec for that many nodes (starting simple)
 	// TODO will need to add GPU and memory here... if Flux supports memory
 	js, err := jspec.NewJobspec(name, command, resources)
-
 	if err != nil {
 		slog.Error(err, "Issue with creating job", "Namespace", namespace, "Name", jobName)
 		return err
