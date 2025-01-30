@@ -76,7 +76,7 @@ spec:
                 description: Original name of the job
                 type: string
               nodes:
-                description: Nodes needed for the job
+                description: Slots needed for the job
                 format: int32
                 type: integer
               object:

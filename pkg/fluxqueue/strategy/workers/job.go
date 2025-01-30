@@ -10,7 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gopkg.in/yaml.v2"
 
+	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
@@ -66,14 +68,24 @@ type JobArgs struct {
 // Work performs the AskFlux action. Any error returned that is due to not having resources means
 // the job will remain in the worker queue to AskFluxion again.
 func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
-	wlog.Info("Asking Fluxion to schedule job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
+	wlog.Info("Asking Fluxion to schedule job",
+		"Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
+
+	fmt.Println(job.Args.Jobspec)
 
 	// Let's ask Flux if we can allocate nodes for the job!
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
+	// Get rid of the attributes section (which should be empty)
+	parts := strings.Split(job.Args.Jobspec, "resources:")
+	satisfyJobspec := "attributes: {}\nresources:\n" + parts[len(parts)-1]
+	fmt.Println(satisfyJobspec)
+
 	// Prepare the request to allocate - convert string to bytes
-	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
+	// This Jobspec includes all slots (pods) so we get an allocation that considers that
+	// We assume reservation allows for the satisfy to be in the future
+	request := &pb.SatisfyRequest{Jobspec: satisfyJobspec, Reservation: job.Args.Reservation == 1}
 
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
 	fluxion, err := client.NewClient("127.0.0.1:4242")
@@ -83,14 +95,14 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	}
 	defer fluxion.Close()
 
-	// An error here is an error with making the request, nothing about
-	// the match/allocation itself.
-	response, err := fluxion.Match(fluxionCtx, request)
+	// An error here is an error with making the request, nothing about the allocation
+	response, err := fluxion.Satisfy(fluxionCtx, request)
 	if err != nil {
-		wlog.Info("[WORK] Fluxion did not receive any match response", "Error", err)
+		wlog.Info("[WORK] Fluxion did not receive any satisfy response", "Error", err)
 		return err
 	}
 
+	// For each node assignment, we make an exact job with that request
 	// If we asked for a reservation, and it wasn't reserved AND not allocated, this means it's not possible
 	// We currently don't have grow/shrink added so this means it will never be possible.
 	// We will unsuspend the job but add a label that indicates it is not schedulable.
@@ -100,20 +112,28 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		return river.JobCancel(fmt.Errorf("fluxion could not allocate nodes for %s/%s, likely Unsatisfiable", job.Args.Namespace, job.Args.Name))
 	}
 
-	// Flux job identifier (known to fluxion)
-	fluxID := response.GetJobid()
-
-	// If it's reserved, add the id to our reservation table
-	// TODO need to clean up this table... but these tasks run async...
-	if response.Reserved {
-		w.reserveJob(fluxionCtx, job.Args, fluxID)
-	}
-
-	// This means we didn't get an allocation - we might have a reservation
+	// This means we didn't get an allocation - proceeding is not possible
 	if response.GetAllocation() == "" {
 		// This will have the job be retried in the queue, still based on sorted schedule time and priority
 		return fmt.Errorf("fluxion could not allocate nodes for job %s/%s", job.Args.Namespace, job.Args.Name)
 	}
+
+	// Parse the jobspec back into form to add the constraint for each node
+	var js jobspec.Jobspec
+	err = yaml.Unmarshal([]byte(job.Args.Jobspec), &js)
+	if err != nil {
+		wlog.Error(err, "Reparsing Jobspec to add constraint")
+		return err
+	}
+
+	// Add the constraint - we will be added one node assignment per pod.
+	// This means that instead of slot N, each request is for one slot
+	js.Attributes = jobspec.Attributes{
+		System: jobspec.System{
+			Constraints: jobspec.Constraints{},
+		},
+	}
+	js.Resources[0].Count = 1
 
 	// Now get the nodes. These are actually cores assigned to nodes, so we need to keep count
 	nodes, err := parseNodes(response.Allocation)
@@ -121,14 +141,50 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		wlog.Info("Error parsing nodes from fluxion response", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 		return err
 	}
-	wlog.Info("Fluxion allocation response", "Nodes", nodes)
+	// TODO is this nodes or slots?
+	wlog.Info("Fluxion allocation response", "Slots", nodes)
 
-	// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
-	err = w.releaseJob(ctx, job.Args, fluxID, nodes)
-	if err != nil {
-		return err
+	for slotNumber, node := range nodes {
+
+		// Update the jobspec for one node
+		js.Attributes.System.Constraints.Node = []string{node}
+		slotJobspec, err := yaml.Marshal(js)
+
+		// TODO we probably want to cancel here
+		if err != nil {
+			wlog.Info("Error creating single slot jobspec", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
+			return err
+		}
+
+		// The strategy will allow some reservation depth of  jobs, so we allow for all slots of the job
+		request := &pb.MatchRequest{Jobspec: string(slotJobspec), Reservation: job.Args.Reservation == 1}
+
+		// An error here is an error with making the request, nothing about the allocation
+		match, err := fluxion.Match(fluxionCtx, request)
+		if err != nil {
+			wlog.Info("[WORK] Fluxion did not receive any match response", "Error", err)
+			return err
+		}
+
+		// Try printing first.
+		// Flux job identifier (known to fluxion)
+		fluxID := match.GetJobid()
+
+		// If it's reserved, add the id to our reservation table
+		// TODO need to clean up this table... but these tasks run async...
+		if response.Reserved {
+			w.reserveJob(fluxionCtx, job.Args, fluxID)
+		}
+
+		// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
+		err = w.releaseJob(ctx, job.Args, fluxID, nodes)
+		if err != nil {
+			return err
+		}
+		wlog.Info("Slot allocated for job", "Slot", slotNumber, "JobId", fluxID, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
+
 	}
-	wlog.Info("Fluxion finished allocating nodes for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
+	wlog.Info("Fluxion finished allocating nodes for job", "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
 	return nil
 }
 

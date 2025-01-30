@@ -1,45 +1,67 @@
 package jobspec
 
 import (
-	corev1 "k8s.io/api/core/v1"
+	v1 "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 )
 
-// https://github.com/kubernetes/kubectl/blob/master/pkg/describe/describe.go#L4211-L4213
-type Resources struct {
-	Cpu     int32
-	Memory  int64
-	Gpu     int64
-	Storage int64
-	Labels  []string
+// NewJobSpec generates a jobspec for some number of slots in a cluster
+// We associate each "slot" with a pod, so the request asks for a specific number of cpu.
+// We also are assuming now that each pod is equivalent, so slots are equivalent.
+// If we want to change this, we will need an ability to define slots of different types.
+func NewJobspec(name string, command []string, resources *Resources) (*v1.Jobspec, error) {
+
+	// This is creating the resources for the slot Cores are always set to minimally 1
+	slotSpec := newSlotSpec(resources)
+
+	// Create the top level resources spec (with a slot)
+	rSpec := []v1.Resource{
+		{
+			Type:  "slot",
+			Count: resources.Count,
+			Label: "default",
+			With:  slotSpec,
+		},
+	}
+
+	// Create the task spec
+	tasks := []v1.Tasks{
+		{
+			Command: command,
+			Slot:    "default",
+			Count:   v1.Count{PerSlot: 1},
+		},
+	}
+
+	// Start preparing the spec
+	spec := v1.Jobspec{
+		Version:   1,
+		Resources: rSpec,
+		Tasks:     tasks,
+	}
+
+	// Attributes are for the system, we aren't going to add them yet
+	// attributes:
+	// system:
+	//   duration: 3600.
+	//   cwd: "/home/flux"
+	//   environment:
+	// 	HOME: "/home/flux"
+	// This is verison 1 as defined by v1 above
+	return &spec, nil
 }
 
-// GeneratePodResources returns resources for a pod, which can
-// be used to populate the flux JobSpec
-func GeneratePodResources(containers []corev1.Container) *Resources {
-
-	// We will sum cpu and memory across containers
-	// For GPU, we could make a more complex jobspec, but for now
-	// assume one container is representative for GPU needed.
-	resources := Resources{}
-
-	for _, container := range containers {
-
-		// Add on Cpu, Memory, GPU from container requests
-		// This is a limited set of resources owned by the pod
-		resources.Cpu += int32(container.Resources.Requests.Cpu().Value())
-		resources.Memory += container.Resources.Requests.Memory().Value()
-		resources.Storage += container.Resources.Requests.StorageEphemeral().Value()
-
-		// We assume that a pod (node) only has access to the same GPU
-		gpus, ok := container.Resources.Limits["nvidia.com/gpu"]
-		if ok {
-			resources.Gpu += gpus.Value()
-		}
+// newSlotSpec creates a spec for one slot, which is one pod (a set of containers)
+func newSlotSpec(resources *Resources) []v1.Resource {
+	slotSpec := []v1.Resource{
+		{Type: "core", Count: resources.Slot.Cpu},
 	}
-
-	// If we have zero cpus, assume 1
-	if resources.Cpu == 0 {
-		resources.Cpu = 1
+	// If we have memory or gpu specified, they are appended
+	if resources.Slot.Gpu > 0 {
+		slotSpec = append(slotSpec, v1.Resource{Type: "gpu", Count: int32(resources.Slot.Gpu)})
 	}
-	return &resources
+	if resources.Slot.Memory > 0 {
+		toMB := resources.Slot.Memory >> 20
+		slotSpec = append(slotSpec, v1.Resource{Type: "memory", Count: int32(toMB)})
+	}
+	return slotSpec
 }
