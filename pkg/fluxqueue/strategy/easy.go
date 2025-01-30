@@ -199,6 +199,7 @@ func (s EasyBackfill) ReadyJobs(ctx context.Context, pool *pgxpool.Pool) ([]work
 			Reservation: model.Reservation,
 			Size:        model.Size,
 			Duration:    model.Duration,
+			Cores:       model.Cores,
 		}
 		jobs = append(jobs, jobArgs)
 	}

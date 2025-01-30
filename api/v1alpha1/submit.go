@@ -81,6 +81,7 @@ func SubmitFluxJob(
 			Slots:   slots,
 			Type:    jobType,
 			Name:    name,
+			Cores:   resources.Slot.Cpu,
 		},
 		Status: FluxJobStatus{
 			SubmitStatus: SubmitStatusNew,

@@ -193,6 +193,7 @@ func (q *Queue) Enqueue(spec *api.FluxJob) (types.EnqueueStatus, error) {
 		reservation,
 		spec.Spec.Duration,
 		spec.Spec.Slots,
+		spec.Spec.Cores,
 	)
 
 	// If unknown, we won't give status submit, and it should requeue to try again

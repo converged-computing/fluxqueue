@@ -108,6 +108,10 @@ type FluxJobSpec struct {
 	// +optional
 	Slots int32 `json:"nodes"`
 
+	// Cores per pod (slot)
+	// +optional
+	Cores int32 `json:"cores"`
+
 	// Resources assigned
 	// +optional
 	Resources Resources `json:"resources"`

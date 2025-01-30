@@ -10,9 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"sigs.k8s.io/yaml"
 
-	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 	"github.com/converged-computing/fluxion/pkg/client"
 	pb "github.com/converged-computing/fluxion/pkg/fluxion-grpc"
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
@@ -56,6 +54,10 @@ type JobArgs struct {
 	FluxJobName string `json:"flux_job_name"`
 	Type        string `json:"type"`
 
+	// This is the number of cores per pod
+	// We use this to calculate / create a final node list
+	Cores int32 `json:"cores"`
+
 	// If true, we are allowed to ask Fluxion for a reservation
 	Reservation int32 `json:"reservation"`
 	Duration    int32 `json:"duration"`
@@ -83,6 +85,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
+	// TODO try again to put this client on the class so we don't connect each time
 	fluxion, err := client.NewClient("127.0.0.1:4242")
 	if err != nil {
 		wlog.Error(err, "Fluxion error connecting to server")
@@ -107,81 +110,35 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 		return river.JobCancel(fmt.Errorf("fluxion could not allocate nodes for %s/%s, likely Unsatisfiable", job.Args.Namespace, job.Args.Name))
 	}
 
-	// This means we didn't get an allocation - proceeding is not possible
+	// Flux job identifier (known to fluxion)
+	fluxID := response.GetJobid()
+
+	// If it's reserved, add the id to our reservation table
+	// TODO need to clean up this table... but these tasks run async...
+	if response.Reserved {
+		w.reserveJob(fluxionCtx, job.Args, fluxID)
+	}
+
+	// This means we didn't get an allocation - we might have a reservation
 	if response.GetAllocation() == "" {
 		// This will have the job be retried in the queue, still based on sorted schedule time and priority
 		return fmt.Errorf("fluxion could not allocate nodes for job %s/%s", job.Args.Namespace, job.Args.Name)
 	}
 
-	// If we get here, we have an allocation. Immediately cancel it.
-	fluxID := response.GetJobid()
-	cancelRequest := &pb.CancelRequest{JobID: fluxID}
-	_, err = fluxion.Cancel(fluxionCtx, cancelRequest)
-	if err != nil {
-		wlog.Error(err, "Canceling initial match alloc without constraint")
-		return err
-	}
-
-	// Parse the jobspec back into form to add the constraint for each node
-	var js jobspec.Jobspec
-	err = yaml.Unmarshal([]byte(job.Args.Jobspec), &js)
-	if err != nil {
-		wlog.Error(err, "Reparsing Jobspec to add constraint")
-		return err
-	}
-	js.Resources[0].Count = int32(1)
-
 	// Now get the nodes. These are actually cores assigned to nodes, so we need to keep count
-	nodes, err := parseNodes(response.Allocation)
+	nodes, err := parseNodes(response.Allocation, job.Args.Cores)
 	if err != nil {
 		wlog.Info("Error parsing nodes from fluxion response", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 		return err
 	}
-	// TODO is this nodes or slots?
-	wlog.Info("Fluxion allocation response", "Slots", nodes)
+	wlog.Info("Fluxion allocation response", "Nodes", nodes)
 
-	for slotNumber, node := range nodes {
-
-		// Update the jobspec for one node
-		js.Attributes.System.Constraints.Hostlist = []string{node}
-		slotJobspec, err := yaml.Marshal(js)
-		fmt.Println(string(slotJobspec))
-
-		// TODO we probably want to cancel here
-		if err != nil {
-			wlog.Info("Error creating single slot jobspec", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
-			return err
-		}
-
-		// The strategy will allow some reservation depth of  jobs, so we allow for all slots of the job
-		request := &pb.MatchRequest{Jobspec: string(slotJobspec), Reservation: job.Args.Reservation == 1}
-
-		// An error here is an error with making the request, nothing about the allocation
-		match, err := fluxion.Match(fluxionCtx, request)
-		if err != nil {
-			wlog.Info("[WORK] Fluxion did not receive any match response", "Error", err)
-			return err
-		}
-
-		// Try printing first.
-		// Flux job identifier (known to fluxion)
-		fluxID := match.GetJobid()
-
-		// If it's reserved, add the id to our reservation table
-		// TODO need to clean up this table... but these tasks run async...
-		if response.Reserved {
-			w.reserveJob(fluxionCtx, job.Args, fluxID)
-		}
-
-		// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
-		err = w.releaseJob(ctx, job.Args, fluxID, nodes)
-		if err != nil {
-			return err
-		}
-		wlog.Info("Slot allocated for job", "Slot", slotNumber, "JobId", fluxID, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
-
+	// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
+	err = w.releaseJob(ctx, job.Args, fluxID, nodes)
+	if err != nil {
+		return err
 	}
-	wlog.Info("Fluxion finished allocating nodes for job", "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
+	wlog.Info("Fluxion finished allocating nodes for job", "JobId", fluxID, "Nodes", nodes, "Namespace", job.Args.Namespace, "Name", job.Args.Name)
 	return nil
 }
 
@@ -250,10 +207,13 @@ func (w JobWorker) reserveJob(ctx context.Context, args JobArgs, fluxID int64) e
 
 // parseNodes parses the allocation nodes into a lookup with core counts
 // We will add these as labels onto each pod for the scheduler, or as one
-func parseNodes(allocation string) ([]string, error) {
+// This means that we get back some allocation graph with the slot defined at cores,
+// so the group size will likely not coincide with the number of nodes. For
+// this reason, we have to divide to place them. The final number should
+// match the group size.
+func parseNodes(allocation string, cores int32) ([]string, error) {
 
 	// We can eventually send over more metadata, for now just a list of nodes
-	nodesWithCores := map[string]int{}
 	nodes := []string{}
 
 	// The response is the graph with assignments. Here we parse the graph into a struct to get nodes.
@@ -263,17 +223,52 @@ func parseNodes(allocation string) ([]string, error) {
 		return nodes, err
 	}
 
-	// To start, just parse nodes and not cores (since we can't bind on level of core)
+	// Parse nodes first and get containment and name lookup
+	lookup := map[string]string{}
 	for _, node := range graph.Graph.Nodes {
 		if node.Metadata.Type == "node" {
+			nodePath := node.Metadata.Paths["containment"]
 			nodeId := node.Metadata.Basename
-			_, ok := nodesWithCores[nodeId]
+			lookup[nodePath] = nodeId
+		}
+	}
+
+	// We are going to first make a count of cores per node. We do this
+	// by parsing the containment path. It should always look like:
+	//  "/cluster0/0/kind-worker1/core0 for a core
+	coreCounts := map[string]int32{}
+	for _, node := range graph.Graph.Nodes {
+		if node.Metadata.Type == "core" {
+			corePath := node.Metadata.Paths["containment"]
+			coreName := fmt.Sprintf("core%d", node.Metadata.Id)
+			nodePath := strings.TrimRight(corePath, "/"+coreName)
+			nodeId, ok := lookup[nodePath]
+
+			// This shouldn't happen, but if it does, we should catch it
 			if !ok {
-				nodesWithCores[nodeId] = 0
-				nodes = append(nodes, nodeId)
+				return nodes, fmt.Errorf("unknown node path %s", nodePath)
 			}
-			// Keep a record of cores assigned per node
-			nodesWithCores[nodeId] += 1
+
+			// Update core counts for the node
+			_, ok = coreCounts[nodeId]
+			if !ok {
+				coreCounts[nodeId] = int32(0)
+			}
+
+			// Each core is one
+			coreCounts[nodeId] += 1
+		}
+	}
+	fmt.Printf("Distributing %d cores per pod into core counts ", cores)
+	fmt.Println(coreCounts)
+
+	// Now we need to divide by the slot size (number of cores per pod)
+	// and add those nodes to a list (there will be repeats)
+	for nodeId, totalCores := range coreCounts {
+		fmt.Printf("Node %s has %d cores to fit %d core(s)\n", nodeId, totalCores, cores)
+		numberSlots := totalCores / cores
+		for _ = range int32(numberSlots) {
+			nodes = append(nodes, nodeId)
 		}
 	}
 	return nodes, nil

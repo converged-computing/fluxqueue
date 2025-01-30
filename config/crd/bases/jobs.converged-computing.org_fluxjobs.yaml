@@ -52,6 +52,10 @@ spec:
               A FluxJob is a mapping of a Kubernetes abstraction (e.g., job)
               into a Flux JobSpec, one that Fluxion can digest.
             properties:
+              cores:
+                description: Cores per pod (slot)
+                format: int32
+                type: integer
               duration:
                 description: Duration is the maximum runtime of the job
                 format: int32
