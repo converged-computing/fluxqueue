@@ -8,7 +8,8 @@ CREATE TABLE pending_queue (
     reservation INTEGER NOT NULL,
     duration INTEGER NOT NULL,
     created_at timestamptz NOT NULL default NOW(),    
-    size INTEGER NOT NULL
+    size INTEGER NOT NULL,
+    cores INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX pending_index ON pending_queue (name, namespace);

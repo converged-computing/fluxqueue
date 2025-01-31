@@ -2,16 +2,13 @@ package v1alpha1
 
 import (
 	"context"
-	"fmt"
 
-	jobspec "github.com/compspec/jobspec-go/pkg/jobspec/v1"
 	jspec "github.com/converged-computing/fluxqueue/pkg/jobspec"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -21,13 +18,14 @@ var (
 )
 
 // SubmitFluxJob wraps a pod or job spec into a FluxJob
-// We essentially create a CRD for a a FluxJob
+// We essentially create a CRD for a a FluxJob. Note that we are asking
+// for SLOTS and not nodes - a slot can be a part of a node.
 func SubmitFluxJob(
 	ctx context.Context,
 	jobType JobWrapped,
 	name string,
 	namespace string,
-	nodes int32,
+	slots int32,
 	containers []corev1.Container,
 ) error {
 
@@ -51,14 +49,14 @@ func SubmitFluxJob(
 		slog.Error(err, "Issue with getting job", "Namespace", namespace, "Name", jobName)
 		return err
 	}
-	resources := jspec.GeneratePodResources(containers)
+	resources := jspec.GeneratePodResources(containers, slots)
 
 	// Artificially create a command for the name and namespace
-	command := fmt.Sprintf("echo %s %s", namespace, name)
+	command := []string{"echo", namespace, name}
 
 	// Generate a jobspec for that many nodes (starting simple)
 	// TODO will need to add GPU and memory here... if Flux supports memory
-	js, err := jobspec.NewSimpleJobspec(name, command, nodes, resources.Cpu)
+	js, err := jspec.NewJobspec(name, command, resources)
 	if err != nil {
 		slog.Error(err, "Issue with creating job", "Namespace", namespace, "Name", jobName)
 		return err
@@ -80,9 +78,10 @@ func SubmitFluxJob(
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace},
 		Spec: FluxJobSpec{
 			JobSpec: jsString,
-			Nodes:   nodes,
+			Slots:   slots,
 			Type:    jobType,
 			Name:    name,
+			Cores:   resources.Slot.Cpu,
 		},
 		Status: FluxJobStatus{
 			SubmitStatus: SubmitStatusNew,

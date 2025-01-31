@@ -8,7 +8,7 @@ const (
 	IsPendingQuery = "select * from pending_queue where name = $1 and namespace = $2;"
 
 	// Insert into pending queue (assumes after above query, we've checked it does not exist)
-	InsertIntoPending = "insert into pending_queue (jobspec, flux_job_name, namespace, name, type, reservation, duration, size) values ($1, $2, $3, $4, $5, $6, $7, $8);"
+	InsertIntoPending = "insert into pending_queue (jobspec, flux_job_name, namespace, name, type, reservation, duration, size, cores) values ($1, $2, $3, $4, $5, $6, $7, $8, $9);"
 	// TODO add back created_at
 
 	// We remove from pending to allow another group submission of the same name on cleanup
@@ -16,7 +16,7 @@ const (
 
 	// Easy Queries to get jobs
 	// Select jobs based on creation timestamp
-	SelectPendingByCreation = "select jobspec, name, flux_job_name, namespace, type, reservation, duration, size from pending_queue order by created_at desc;"
+	SelectPendingByCreation = "select jobspec, name, flux_job_name, namespace, type, reservation, duration, size, cores from pending_queue order by created_at desc;"
 
 	// Reservations
 	AddReservationQuery           = "insert into reservations (name, flux_id) values ($1, $2);"

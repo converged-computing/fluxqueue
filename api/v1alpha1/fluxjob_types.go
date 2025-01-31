@@ -104,9 +104,13 @@ type FluxJobSpec struct {
 	// +optional
 	Reservation bool `json:"reservation,omitempty"`
 
-	// Nodes needed for the job
+	// Slots needed for the job
 	// +optional
-	Nodes int32 `json:"nodes"`
+	Slots int32 `json:"nodes"`
+
+	// Cores per pod (slot)
+	// +optional
+	Cores int32 `json:"cores"`
 
 	// Resources assigned
 	// +optional

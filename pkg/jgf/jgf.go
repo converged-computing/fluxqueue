@@ -51,6 +51,13 @@ func NewFluxJGF() FluxJGF {
 	}
 }
 
+// Load a graph payload into a JGF structure
+func LoadFluxJGF(payload string) (FluxJGF, error) {
+	var graph FluxJGF
+	err := json.Unmarshal([]byte(payload), &graph)
+	return graph, err
+}
+
 // ToJson returns a Json string of the graph
 func (g *FluxJGF) ToJson() (string, error) {
 	toprint, err := json.MarshalIndent(g.Graph, "", "\t")
@@ -81,7 +88,7 @@ func (g *FluxJGF) MakeBidirectionalEdge(parent, child string) {
 
 // MakeEdge creates an edge for the JGF
 func (g *FluxJGF) MakeEdge(source string, target string, contains string) {
-	newedge := edge{
+	newedge := Edge{
 		Source:   source,
 		Target:   target,
 		Metadata: edgeMetadata{Subsystem: containmentKey},

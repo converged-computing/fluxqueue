@@ -29,6 +29,7 @@ type JobModel struct {
 	Reservation int32  `db:"reservation"`
 	Duration    int32  `db:"duration"`
 	Size        int32  `db:"size"`
+	Cores       int32  `db:"cores"`
 }
 
 type ReservationModel struct {

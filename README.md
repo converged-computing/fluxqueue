@@ -239,6 +239,7 @@ SELECT * from reservations;
   - we need to use shrink or partial cancel here. And a shrink down to size 0 I assume is a cancel.
 - [ ] For cancel, we would issue a cancel for every pod associated with a job. How can we avoid that (or is that OK?)
 - [ ] we will eventually need another mechanism to move schedule queue aside from new submission
+- What if instead of loop we do reservation every N jobs? Then we wouldn't need a loop?
 - [ ] scheduleAt can be used to AskFlux in the future
 - [ ] Nodes that are currently assigned need to be taken into account
    - Right now they aren't included in resources, but instead should be "given" to Fluxion.

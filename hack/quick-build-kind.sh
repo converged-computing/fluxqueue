@@ -28,7 +28,7 @@ helm install \
   --set scheduler.image=${REGISTRY}/fluxqueue-scheduler:latest \
   --set postgres.image=${REGISTRY}/fluxqueue-postgres:latest \
   --set controllerManager.manager.imagePullPolicy=Never \
-  --set controllerManager.fluxion.image.tag=grow-api \
+  --set controllerManager.fluxion.image.tag=satisfy \
   --namespace ${NAMESPACE} \
   --create-namespace \
   --set scheduler.pullPolicy=Never \

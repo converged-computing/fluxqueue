@@ -2,7 +2,6 @@ package workers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -16,7 +15,7 @@ import (
 	api "github.com/converged-computing/fluxqueue/api/v1alpha1"
 	"github.com/converged-computing/fluxqueue/pkg/defaults"
 	"github.com/converged-computing/fluxqueue/pkg/fluxqueue/queries"
-	"github.com/converged-computing/fluxqueue/pkg/types"
+	jgf "github.com/converged-computing/fluxqueue/pkg/jgf"
 	"github.com/riverqueue/river"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	patchTypes "k8s.io/apimachinery/pkg/types"
@@ -54,6 +53,10 @@ type JobArgs struct {
 	FluxJobName string `json:"flux_job_name"`
 	Type        string `json:"type"`
 
+	// This is the number of cores per pod
+	// We use this to calculate / create a final node list
+	Cores int32 `json:"cores"`
+
 	// If true, we are allowed to ask Fluxion for a reservation
 	Reservation int32 `json:"reservation"`
 	Duration    int32 `json:"duration"`
@@ -66,16 +69,22 @@ type JobArgs struct {
 // Work performs the AskFlux action. Any error returned that is due to not having resources means
 // the job will remain in the worker queue to AskFluxion again.
 func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
-	wlog.Info("Asking Fluxion to schedule job", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
+	wlog.Info("Asking Fluxion to schedule job",
+		"Namespace", job.Args.Namespace, "Name", job.Args.Name, "Nodes", job.Args.Size)
+
+	fmt.Println(job.Args.Jobspec)
 
 	// Let's ask Flux if we can allocate nodes for the job!
 	fluxionCtx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
 	defer cancel()
 
 	// Prepare the request to allocate - convert string to bytes
+	// This Jobspec includes all slots (pods) so we get an allocation that considers that
+	// We assume reservation allows for the satisfy to be in the future
 	request := &pb.MatchRequest{Jobspec: job.Args.Jobspec, Reservation: job.Args.Reservation == 1}
 
 	// This is the host where fluxion is running, will be localhost 4242 for sidecar
+	// TODO try again to put this client on the class so we don't connect each time
 	fluxion, err := client.NewClient("127.0.0.1:4242")
 	if err != nil {
 		wlog.Error(err, "Fluxion error connecting to server")
@@ -83,14 +92,14 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	}
 	defer fluxion.Close()
 
-	// An error here is an error with making the request, nothing about
-	// the match/allocation itself.
+	// An error here is an error with making the request, nothing about the allocation
 	response, err := fluxion.Match(fluxionCtx, request)
 	if err != nil {
-		wlog.Info("[WORK] Fluxion did not receive any match response", "Error", err)
+		wlog.Info("[WORK] Fluxion did not receive any satisfy response", "Error", err)
 		return err
 	}
 
+	// For each node assignment, we make an exact job with that request
 	// If we asked for a reservation, and it wasn't reserved AND not allocated, this means it's not possible
 	// We currently don't have grow/shrink added so this means it will never be possible.
 	// We will unsuspend the job but add a label that indicates it is not schedulable.
@@ -116,7 +125,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	}
 
 	// Now get the nodes. These are actually cores assigned to nodes, so we need to keep count
-	nodes, err := parseNodes(response.Allocation)
+	nodes, cancelResponses, err := parseNodes(response.Allocation, job.Args.Cores)
 	if err != nil {
 		wlog.Info("Error parsing nodes from fluxion response", "Namespace", job.Args.Namespace, "Name", job.Args.Name, "Error", err)
 		return err
@@ -124,7 +133,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 	wlog.Info("Fluxion allocation response", "Nodes", nodes)
 
 	// Unsuspend the job or ungate the pods, adding the node assignments as labels for the scheduler
-	err = w.releaseJob(ctx, job.Args, fluxID, nodes)
+	err = w.releaseJob(ctx, job.Args, fluxID, nodes, cancelResponses)
 	if err != nil {
 		return err
 	}
@@ -133,7 +142,7 @@ func (w JobWorker) Work(ctx context.Context, job *river.Job[JobArgs]) error {
 }
 
 // Release job will unsuspend a job or ungate pods to allow for scheduling
-func (w JobWorker) releaseJob(ctx context.Context, args JobArgs, fluxID int64, nodes []string) error {
+func (w JobWorker) releaseJob(ctx context.Context, args JobArgs, fluxID int64, nodes []string, cancelResponses []string) error {
 	var err error
 
 	if args.Type == api.JobWrappedJob.String() {
@@ -197,33 +206,179 @@ func (w JobWorker) reserveJob(ctx context.Context, args JobArgs, fluxID int64) e
 
 // parseNodes parses the allocation nodes into a lookup with core counts
 // We will add these as labels onto each pod for the scheduler, or as one
-func parseNodes(allocation string) ([]string, error) {
+// This means that we get back some allocation graph with the slot defined at cores,
+// so the group size will likely not coincide with the number of nodes. For
+// this reason, we have to divide to place them. The final number should
+// match the group size.
+func parseNodes(allocation string, cores int32) ([]string, []string, error) {
 
 	// We can eventually send over more metadata, for now just a list of nodes
-	nodesWithCores := map[string]int{}
 	nodes := []string{}
 
-	// The response is the graph with assignments. Here we parse the graph into a struct to get nodes.
-	var graph types.AllocationResponse
-	err := json.Unmarshal([]byte(allocation), &graph)
+	// We also need to save a corresponding cancel request
+	cancelRequests := []string{}
+
+	// Also try serailizing back into graph
+	g, err := jgf.LoadFluxJGF(allocation)
 	if err != nil {
-		return nodes, err
+		return nodes, cancelRequests, err
+	}
+	fmt.Println(g)
+
+	// For each pod, we will need to be able to do partial cancel.
+	// We can do this by saving the initial graph (without cores)
+	// and adding them on to the cancel request. We first need a lookup
+	// for the path between cluster->subnet->nodes->cores.
+	// This logic will need to be updated if we change the graph.
+	nodeLookup := map[string]jgf.Node{}
+
+	// Store nodes based on paths
+	nodePaths := map[string]jgf.Node{}
+	edgeLookup := map[string][]jgf.Edge{}
+
+	// Parse nodes first so we can match the containment path to the host
+	for _, node := range g.Graph.Nodes {
+		nodeLookup[node.Id] = node
+		nodePaths[node.Metadata.Paths["containment"]] = node
 	}
 
-	// To start, just parse nodes and not cores (since we can't bind on level of core)
-	for _, node := range graph.Graph.Nodes {
+	// The edge lookup will allow us to add connected nodes
+	// We need to be able to map a node path to a list of edges
+	// The node path gets us the node id (source)
+	var addEdge = func(node *jgf.Node, edge *jgf.Edge) {
+		path := node.Metadata.Paths["containment"]
+		_, ok := edgeLookup[path]
+		if !ok {
+			edgeLookup[path] = []jgf.Edge{}
+		}
+		edgeLookup[path] = append(edgeLookup[path], *edge)
+	}
+	for _, edge := range g.Graph.Edges {
+		targetNode := nodeLookup[edge.Target]
+		sourceNode := nodeLookup[edge.Source]
+		addEdge(&targetNode, &edge)
+		addEdge(&sourceNode, &edge)
+	}
+
+	// Parse nodes first so we can match the containment path to the host
+	lookup := map[string]string{}
+	for _, node := range g.Graph.Nodes {
+		nodePath := node.Metadata.Paths["containment"]
+		nodeLookup[fmt.Sprintf("%d", node.Metadata.Id)] = node
 		if node.Metadata.Type == "node" {
 			nodeId := node.Metadata.Basename
-			_, ok := nodesWithCores[nodeId]
-			if !ok {
-				nodesWithCores[nodeId] = 0
-				nodes = append(nodes, nodeId)
-			}
-			// Keep a record of cores assigned per node
-			nodesWithCores[nodeId] += 1
+			lookup[nodePath] = nodeId
 		}
 	}
-	return nodes, nil
+
+	// We also need to know the exact cores that are assigned to each node
+	coresByNode := map[string][]jgf.Node{}
+
+	// We are going to first make a count of cores per node. We do this
+	// by parsing the containment path. It should always look like:
+	//  "/cluster0/0/kind-worker1/core0 for a core
+	coreCounts := map[string]int32{}
+	for _, node := range g.Graph.Nodes {
+		path := node.Metadata.Paths["containment"]
+
+		if node.Metadata.Type == "core" {
+			coreName := fmt.Sprintf("core%d", node.Metadata.Id)
+			nodePath := strings.TrimRight(path, "/"+coreName)
+			nodeId, ok := lookup[nodePath]
+
+			// This shouldn't happen, but if it does, we should catch it
+			if !ok {
+				return nodes, cancelRequests, fmt.Errorf("unknown node path %s", nodePath)
+			}
+
+			// Update core counts for the node
+			_, ok = coreCounts[nodeId]
+			if !ok {
+				coreCounts[nodeId] = int32(0)
+			}
+
+			// Each core is one
+			coreCounts[nodeId] += 1
+
+			// This is a list of cores (node) assigned to the physical node
+			// We do this based on ids so we can use the edge lookup
+			assignedCores, ok := coresByNode[nodePath]
+			if !ok {
+				assignedCores = []jgf.Node{}
+			}
+			assignedCores = append(assignedCores, node)
+			coresByNode[nodeId] = assignedCores
+		}
+	}
+	fmt.Printf("Distributing %d cores per pod into core counts ", cores)
+	fmt.Println(coreCounts)
+
+	// Now we need to divide by the slot size (number of cores per pod)
+	// and add those nodes to a list (there will be repeats). For each slot
+	// (pod) we need to generate a JGF that includes resources for cancel.
+	for nodeId, totalCores := range coreCounts {
+		fmt.Printf("Node %s has %d cores across slots to fit %d core(s) per slot\n", nodeId, totalCores, cores)
+		numberSlots := totalCores / cores
+		for _ = range int32(numberSlots) {
+
+			// Prepare a graph for a cancel response
+			graph := jgf.NewFluxJGF()
+			seenEdges := map[string]bool{}
+			coreNodes := coresByNode[nodeId]
+
+			// addNewEdges to the graph Edges if we haven't yet
+			var addNewEdges = func(path string) {
+				addEdges, ok := edgeLookup[path]
+				if ok {
+					for _, addEdge := range addEdges {
+						edgeId := fmt.Sprintf("%s-%s", addEdge.Source, addEdge.Target)
+						_, alreadyAdded := seenEdges[edgeId]
+						if !alreadyAdded {
+							graph.Graph.Edges = append(graph.Graph.Edges, addEdge)
+							seenEdges[edgeId] = true
+						}
+					}
+				}
+			}
+
+			// The cancel response needs only units from the graph associated
+			// with the specific cores assigned.
+			for _, coreNode := range coreNodes {
+				path := coreNode.Metadata.Paths["containment"]
+				_, ok := graph.NodeMap[path]
+				if !ok {
+					graph.NodeMap[path] = coreNode
+					graph.Graph.Nodes = append(graph.Graph.Nodes, coreNode)
+					addNewEdges(path)
+				}
+				// Parse the entire path and add nodes up root
+				parts := strings.Split(path, "/")
+				for idx := range len(parts) {
+					if idx == 0 {
+						continue
+					}
+					path := strings.Join(parts[0:idx], "/")
+					fmt.Println(path)
+					_, ok := graph.NodeMap[path]
+					if !ok {
+						graph.NodeMap[path] = nodePaths[path]
+						graph.Graph.Nodes = append(graph.Graph.Nodes, nodePaths[path])
+						addNewEdges(path)
+					}
+				}
+			}
+			nodes = append(nodes, nodeId)
+
+			// Serialize the cancel request to string
+			graphStr, err := graph.ToJson()
+			if err != nil {
+				return nodes, cancelRequests, err
+			}
+			cancelRequests = append(cancelRequests, graphStr)
+			fmt.Println(graphStr)
+		}
+	}
+	return nodes, cancelRequests, nil
 }
 
 // Unsuspend the job, adding an annotation for nodes along with the fluxion scheduler
