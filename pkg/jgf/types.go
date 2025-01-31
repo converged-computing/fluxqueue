@@ -8,7 +8,7 @@ type Node struct {
 	Metadata nodeMetadata `json:"metadata,omitempty"`
 }
 
-type edge struct {
+type Edge struct {
 	Source   string       `json:"source"`
 	Relation string       `json:"relation,omitempty"`
 	Target   string       `json:"target"`
@@ -36,7 +36,7 @@ type nodeMetadata struct {
 
 type graph struct {
 	Nodes []Node `json:"nodes"`
-	Edges []edge `json:"edges"`
+	Edges []Edge `json:"edges"`
 	//	Metadata metadata 	`json:"metadata,omitempty"`
 	Directed bool `json:"directed,omitempty"`
 }
